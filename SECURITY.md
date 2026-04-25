@@ -8,11 +8,17 @@ document end-to-end before running `ralph.sh`.
 
 ## ⚠️  AI-generated code
 
-The harness scripts in this repo (`ralph.sh`, `ralph-dashboard.sh`,
-`ralph-live.sh`, the PRD) are mostly hand-written, but the configurator
-this loop produces — at
-[revolutionaryPhoton/f13-configurator](https://github.com/revolutionaryPhoton/f13-configurator)
-— is almost entirely written by Claude Code per iteration.
+**Both halves of this project are largely AI-generated.**
+
+- The harness scripts in this repo (`ralph.sh`, `ralph-dashboard.sh`,
+  `ralph-live.sh`, the PRD) were written mostly by Claude Code through
+  interactive sessions on macOS and Linux, with iterative human review.
+- The configurator this loop drives — at
+  [revolutionaryPhoton/f13-configurator](https://github.com/revolutionaryPhoton/f13-configurator)
+  — is almost entirely written by Claude Code per iteration, with human
+  spot-checks on each diff but no line-by-line review.
+
+There has been no formal security audit of either codebase.
 
 What this means for users / contributors of either repo:
 
