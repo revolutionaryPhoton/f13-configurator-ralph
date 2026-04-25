@@ -1,9 +1,10 @@
 # f13-configurator-ralph
 
 The Ralph-loop harness that drives Claude Code through the implementation of
-the [F13 Shell Configurator](https://github.com/revolutionaryPhoton/f13-configurator).
-Each iteration: read a PRD, pick the next story, implement it, run backpressure
-checks, commit, repeat.
+the [F13 Configurator](https://github.com/revolutionaryPhoton/f13-configurator)
+— a setup wizard for F13 deployments with both a shell and a desktop-GUI
+surface. Each iteration: read a PRD, pick the next story, implement it, run
+backpressure checks, commit, repeat.
 
 > **Heads up — this is operator tooling, not a product.** It runs Claude Code
 > with `--dangerously-skip-permissions` inside Docker, burns Anthropic API
