@@ -6,6 +6,31 @@ document end-to-end before running `ralph.sh`.
 
 ---
 
+## ⚠️  AI-generated code
+
+The harness scripts in this repo (`ralph.sh`, `ralph-dashboard.sh`,
+`ralph-live.sh`, the PRD) are mostly hand-written, but the configurator
+this loop produces — at
+[revolutionaryPhoton/f13-configurator](https://github.com/revolutionaryPhoton/f13-configurator)
+— is almost entirely written by Claude Code per iteration.
+
+What this means for users / contributors of either repo:
+
+- **Don't trust generated code blindly.** Each iteration's diff has been
+  shellcheck'd / bats-tested / spot-checked, but there is no line-by-line
+  review and no formal security audit.
+- **Read diffs before relying on anything.** Particularly anything
+  involving secrets, network calls, file permissions, or shell-out
+  commands built from user input.
+- **Bug class to expect:** subtle parsing / escaping / permissions /
+  state-machine bugs. The five regressions during S16 (paren imbalance,
+  semicolon-eating regex, mktemp perms, exec-but-not-read on USER 999,
+  recursive function injection) are representative — automated tests
+  caught zero of them; only a human running the wizard end-to-end did.
+- **If you spot something concerning, open an issue.**
+
+---
+
 ## 🔑 Anthropic OAuth token (`CLAUDE_CODE_OAUTH_TOKEN`)
 
 - This is a long-lived OAuth token with full Claude Code permissions on

@@ -10,6 +10,12 @@ checks, commit, repeat.
 > credits, and writes commits to a separate sibling repo. Read
 > [SECURITY.md](SECURITY.md) before running it.
 
+> ⚠️  **The repo this loop drives is itself almost entirely AI-generated.**
+> The harness scripts in this repo are mostly hand-written, but the configurator
+> at [revolutionaryPhoton/f13-configurator](https://github.com/revolutionaryPhoton/f13-configurator)
+> was produced by this very loop. Anyone reading either codebase should treat
+> generated code as needing review before relying on it.
+
 ---
 
 ## What's in here
