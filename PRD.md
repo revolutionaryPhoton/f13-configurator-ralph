@@ -775,16 +775,49 @@ not a re-implementation.
   - Theme toggle (light / dark / system).
   Commit.
 
-- [ ] **S29: Cross-platform packaging**
+- [ ] **S29: Packaging infrastructure (no distributable artifacts yet)**
 
-  - macOS: `.dmg` and `.app`, code signing optional (document the
-    self-signed instructions).
-  - Linux: `.AppImage` and `.deb`. Verify on Ubuntu 22.04 + 24.04.
-  - Bundle the shell scripts as Tauri sidecar resources so the app
-    works without a separate clone.
-  - GitHub Actions workflow that builds artifacts on push to `main`
-    (the workflow file goes under `gui/.github/workflows/release.yml`,
-    but the .github dir lives at the repo root — confirm the path).
+  Goal: every piece needed to *eventually* produce signed installers is
+  in place and validated by a local debug build, but **no `.dmg` /
+  `.AppImage` / `.deb` is shipped**. Distribution is intentionally
+  deferred until the maintainer has run the GUI end-to-end on macOS and
+  Linux (out-of-scope; tracked as a future Phase 8 in the PRD's "Out of
+  Scope" section).
+
+  In scope for S29:
+  - **`gui/src-tauri/tauri.conf.json` bundle config:**
+    - `productName`, `identifier` (`de.f13-os.configurator` — confirm
+      with the maintainer), `version`, `category`, `shortDescription`,
+      `longDescription`.
+    - Bundle target list set to `[]` (intentionally empty, so
+      `tauri build` produces only the binary, no installers).
+  - **App icons** — generate the full Tauri icon set (`gui/src-tauri/icons/`)
+    from a single 1024×1024 source (use `tauri icon` CLI). Verify the
+    generated `.icns` (macOS) and `.png` (Linux) are present and
+    correctly sized.
+  - **Sidecar resource bundling** — declare `bin/f13-config`, `bin/f13-stop`,
+    `bin/f13-reset`, `bin/f13-rebuild-frontend`, plus `lib/` and
+    `templates/`, as Tauri resources. Engine adapter (S18) resolves
+    paths via `app.path().resource_dir()` so it works in both `tauri
+    dev` and `tauri build` modes. Add a Vitest that asserts the
+    resolved path exists in both modes.
+  - **`tauri build --debug`** must succeed on the maintainer's machine
+    (macOS arm64 to start). The output is a runnable `.app` (macOS) or
+    binary (Linux) that the maintainer can launch directly.
+  - **Linux build deps** — document in `gui/CONTRIBUTING.md` the apt
+    list (`libwebkit2gtk-4.1-dev`, `libglib2.0-dev`, `libgtk-3-dev`,
+    `libssl-dev`, `build-essential`, `librsvg2-dev`, `patchelf`).
+  - **CI workflow stub** — `.github/workflows/gui-build.yml` exists and
+    runs `tauri build --debug` on macOS-latest and ubuntu-latest, but
+    does NOT publish artifacts. This is the smoke test that the
+    packaging config doesn't drift; releasing is Phase 8's job.
+
+  **Explicitly out of scope for S29 (deferred to a future Phase 8):**
+  - Producing signed/notarized `.dmg` for macOS distribution.
+  - Producing `.AppImage` and `.deb` for Linux distribution.
+  - Apple Developer ID signing, notarization, or Linux package signing.
+  - GitHub Releases automation.
+  - Auto-update flow.
   Commit.
 
 - [ ] **S30: GUI README + screenshots + CHANGELOG**
@@ -831,4 +864,9 @@ not a re-implementation.
 - Cloud LLM APIs (OpenAI, Anthropic, etc.) — can be added in v2.
 - GPU compose variants.
 - Windows / WSL-specific handling.
-- A GUI.
+- Signed distributable GUI artifacts (`.dmg`, `.AppImage`, `.deb`) and
+  any release/auto-update flow. The GUI itself is in scope (Phase 7);
+  packaging *infrastructure* is in scope (S29). Producing
+  signed/notarized artifacts for distribution is deferred to a future
+  Phase 8 — only kicked off after the maintainer has run the GUI end
+  to end on macOS and Linux locally.
