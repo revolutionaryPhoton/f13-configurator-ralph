@@ -1,0 +1,14 @@
+# Personal operator runbook + webhook URL — never commit
+.env.local
+OPERATIONS.md
+
+# The configurator project lives in its own repo:
+# https://github.com/revolutionaryPhoton/f13-configurator.git
+configurator_v1/
+
+# Ralph loop runtime logs (per-iteration JSON, usage data)
+ralph-logs/
+
+# OS noise
+.DS_Store
+Thumbs.db
