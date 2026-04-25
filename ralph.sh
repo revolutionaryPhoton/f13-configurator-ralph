@@ -15,7 +15,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKDIR="configurator_v1"
 PROGRESS="PROGRESS.md"
 LOGDIR="ralph-logs"
-STORIES_TOTAL=17  # S00..S16
+STORIES_TOTAL=32  # S00..S31 (Phase 6 = S00–S16 shell, Phase 7 = S17–S31 GUI)
 
 # ── Colors ──
 RED='\033[0;31m'
@@ -99,6 +99,17 @@ Read /PRD.md for all rules. Key points:
   after reviewing each iteration. Just commit locally.
 - The loop runs in a sandboxed docker container without GitHub
   credentials, so push attempts would fail anyway.
+
+## Story tracks
+- S00–S15: shell wizard core (Phase 0–5, complete).
+- S16: patched frontend image with feature gating (Phase 6, complete).
+- S17–S31: desktop GUI (Phase 7, in progress). Lives under `gui/`.
+  Stack: Tauri 2.x + Svelte 5 + Vite + Tailwind 4 + TypeScript strict.
+  Backpressure for GUI stories:
+      cd gui && npm run check && npm run test:unit && cargo check
+  Plus the original shellcheck + bats for any non-gui changes.
+  Invoke /frontend-design-v2 skill before writing any .svelte file
+  with UI. Coverage target on TS/Svelte: >= 75%.
 CLAUDEMD
   echo -e "${GREEN}Created $WORKDIR/CLAUDE.md${NC}"
 fi
@@ -131,9 +142,16 @@ RULES:
 - Every executed script starts with: set -euo pipefail
 - Functions are namespaced (ui::, prompt::, secret::, ports::, etc.).
 - User-facing output goes through lib/ui.sh helpers.
-- Backpressure: shellcheck -S warning bin/* lib/*.sh && bats tests/
+- Backpressure depends on which track the story is on:
+  - Shell stories (anything OUTSIDE gui/):
+        shellcheck -S warning bin/* lib/*.sh && bats tests/
+  - GUI stories (anything INSIDE gui/, S17 onward):
+        cd gui && npm run check && npm run test:unit && cargo check
+    Plus the shell backpressure if the story also touched non-gui files.
   Both MUST pass before committing.
 - Every new .sh file ships with at least one bats test.
+- Every new .svelte/.ts file ships with at least one vitest test.
+- Invoke /frontend-design-v2 skill before writing any .svelte UI file.
 - Only commit if ALL checks pass.
 - Commit message: <TYPE> [scope]: <description> (max 72 chars)
   Types: ADD, RM, BF, NF, DOC, RF

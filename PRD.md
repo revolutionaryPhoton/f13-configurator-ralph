@@ -540,6 +540,272 @@ configurator_v1/
   **Note:** `../../frontend/` is read-only source. The patch is applied to
   a temp copy; the original is never modified.
 
+### Phase 7: Desktop GUI
+
+A cross-platform desktop wrapper around the existing shell wizard, so
+non-shell users (PMs, POs, demo audiences) can click through the same
+flow on macOS or Linux. Shares the same engine — the GUI is a UI surface,
+not a re-implementation.
+
+**Stack:**
+- **Tauri 2.x** for the desktop shell (small binary, system webview).
+- **Svelte 5 + Vite + Tailwind CSS 4** for the UI, matching the F13
+  frontend stack so the design system imports cleanly.
+- **TypeScript** strict mode, no `any`.
+- **Vitest + @testing-library/svelte** for component tests.
+
+**Repo layout:**
+- The GUI lives at `configurator_v1/gui/` (sibling of `bin/`, `lib/`,
+  `templates/`, `tests/`). One repo, two surfaces.
+- The GUI vendors no engine logic of its own. It shells out to the
+  existing scripts via Tauri's `Command` API and parses their output.
+- A future Phase 8 can extract the engine into a TypeScript / Rust
+  library that both the CLI and GUI call as a function. Out of scope
+  here.
+
+**Audience and constraints (v1 GUI):**
+- Sysadmins doing first deployment on their laptop. CLI-fluent, but
+  benefit from a one-window flow.
+- PMs / POs running click-through demos on macOS or Linux desktops.
+- Single-instance demo only. No deployment-host / headless / auto-update
+  yet.
+- The shell wizard at `bin/f13-config` stays first-class — must keep
+  working without the GUI for SSH, CI, and scripting.
+
+**Mandatory rules (extension of Phase 0–6 rules):**
+- Invoke `/frontend-design-v2` skill before writing any `.svelte` file
+  with UI. Same as the original frontend rules. No exceptions.
+- Backpressure for GUI stories:
+  ```bash
+  cd gui && npm run check && npm run test:unit && cargo check
+  ```
+  Plus the original shell backpressure (`shellcheck` + `bats`) for any
+  changes outside `gui/`.
+- Coverage ≥ 75 % on new/modified TS/Svelte files (lower than v1's 80 %
+  because Tauri integration paths are hard to unit-test).
+- Never call docker / shell commands directly from Svelte components.
+  All side effects route through the engine adapter (S18) so they're
+  testable.
+- The Tauri allowlist (`tauri.conf.json` -> `app.security.csp` and
+  `permissions/`) is restrictive by default. Each new shelled-out
+  command requires an explicit permission entry.
+
+**Story list (S17 — S31):**
+
+- [ ] **S17: Tauri scaffolding + dev workflow**
+
+  Inside `configurator_v1/gui/`, scaffold a Tauri 2.x app:
+  - `npm create tauri-app@latest` with template `svelte-ts`.
+  - Configure: Vite, TypeScript strict, Tailwind CSS 4, Vitest,
+    Biome (matching F13 frontend conventions).
+  - Hello-world window opens on `npm run tauri dev`.
+  - Verify on both macOS and Linux (the latter requires
+    `libwebkit2gtk-4.1-dev`, `libglib2.0-dev`, `libgtk-3-dev`,
+    `libssl-dev`, `build-essential`, `librsvg2-dev`, `patchelf` —
+    document in `gui/README.md`).
+  - The ralph image needs Rust + the system deps above. Either extend
+    `ralph.sh`'s apt-install line OR build a derived image. Document
+    the choice in `gui/CONTRIBUTING.md`.
+  Commit.
+
+- [ ] **S18: Engine adapter (`gui/src/lib/engine.ts`)**
+
+  Typed wrapper that shells out to the existing CLI:
+  - `engine.preflight()` → streams ✅/❌/ⓘ events.
+  - `engine.detectState()` → returns existing `.state` or null.
+  - `engine.listOllamaModels()` → string[] or 'not-running'.
+  - `engine.checkPort(n)` → 'free' | { inUseBy: PID, name }.
+  - `engine.runWizardNonInteractive(opts)` → streams pipeline events
+    (rendering, building, pulling, starting, healthy).
+  - `engine.compose.up()`, `engine.compose.down()`,
+    `engine.compose.reset()`, `engine.compose.health()`.
+
+  Implementation: each method invokes `bin/f13-config` (or
+  `bin/f13-stop`, `bin/f13-reset`) via Tauri's `Command::sidecar` with
+  `F13_CONFIG_NONINTERACTIVE=1` and parses stdout/stderr. Output uses
+  a single-line JSON event format (this is also a story output: the
+  CLI gains an `--emit-events` flag in S18 that prints structured
+  events to stdout instead of pretty text).
+
+  **CLI changes required for S18:**
+  - Add `--emit-events` flag to `bin/f13-config` that switches stdout
+    from `ui::*` text helpers to one JSON object per line:
+    `{"type":"preflight","name":"docker","status":"ok"}` etc.
+  - All other binaries (`f13-stop`, `f13-reset`,
+    `f13-rebuild-frontend`) gain the same flag.
+  - Behavior of pretty mode is unchanged.
+
+  Vitest: subprocess mocked with a fixture stream of JSON events; assert
+  the adapter emits typed events to its consumers.
+  Commit.
+
+- [ ] **S19: Design system import (`gui/src/lib/theme/`)**
+
+  Invoke `/frontend-design-v2` skill before writing any UI.
+  Bring over (or reproduce) from the F13 frontend:
+  - `tokens.css` — F13 color palette, light + dark.
+  - Ubuntu font face declarations.
+  - Logos / favicon copied from `../frontend/public/logos/`.
+  - Base components: `Button.svelte`, `Tile.svelte` (the big tile from
+    the inference picker), `RadioRow.svelte`, `ProgressBar.svelte`,
+    `Disclosure.svelte`, `LogViewer.svelte`, `Modal.svelte`, `Toast.svelte`.
+  - Tailwind CSS 4 configured to consume CSS custom properties from
+    `tokens.css`.
+
+  All components must pass WCAG 2.2 AA contrast checks. Vitest + axe-core
+  smoke test on each.
+  Commit.
+
+- [ ] **S20: Welcome screen + state-aware routing**
+
+  Invoke `/frontend-design-v2` skill before writing any UI.
+  Implement `gui/src/routes/+page.svelte`:
+  - F13 ASCII logo (or SVG version), tagline, primary "Begin setup" CTA.
+  - "Open existing setup" link calls `engine.detectState()`. If a state
+    file exists, route to `/status`. If not, the link is hidden.
+  - Mockup reference: section 1 of the GUI sketch.
+  Component test: with state-present and state-absent fixtures, assert
+  routing.
+  Commit.
+
+- [ ] **S21: Preflight screen**
+
+  Invoke `/frontend-design-v2` skill.
+  Implement `gui/src/routes/wizard/preflight/+page.svelte`:
+  - Streaming check list driven by `engine.preflight()` events.
+  - Hard failures (docker missing, etc.): inline "Fix this" disclosure
+    that pastes the install command (cmd + key, or one-click copy).
+  - Soft notes (Ollama detection): rendered as ⓘ rows with the model
+    list nested. Doesn't block continuation.
+  - "Continue" disabled until the stream finishes; remains disabled if
+    a hard failure exists.
+  Mockup reference: section 2.
+  Component test: feed scripted event streams, assert UI state at each.
+  Commit.
+
+- [ ] **S22: Inference picker**
+
+  Invoke `/frontend-design-v2` skill.
+  Implement `gui/src/routes/wizard/inference/+page.svelte`:
+  - Two large `Tile.svelte` components: 🧪 Mock, 🦙 Ollama.
+  - Pros / cons list inside each tile.
+  - "Recommended for first-time setup" chip on Mock.
+  - Selecting Ollama enables the next step (S23); selecting Mock skips
+    to ports (S24).
+  Mockup reference: section 3.
+  Component test: click events change selected state; outcome events
+  are dispatched.
+  Commit.
+
+- [ ] **S23: Ollama model picker**
+
+  Invoke `/frontend-design-v2` skill.
+  Implement `gui/src/routes/wizard/inference/ollama/+page.svelte`:
+  - Warning banner at top: GPU requirements + cloud-tag sign-in note
+    (matches the shell wizard's S07/S22 warning).
+  - List from `engine.listOllamaModels()`. Cloud-tagged models get a
+    `☁ cloud` badge; local models show disk size if available.
+  - "Refresh" link re-runs `engine.listOllamaModels()` (handy after
+    `ollama pull`).
+  - If Ollama is not running, render a different state with start-it
+    instructions and a retry button.
+  Mockup reference: section 3b.
+  Commit.
+
+- [ ] **S24: Ports screen**
+
+  Invoke `/frontend-design-v2` skill.
+  Implement `gui/src/routes/wizard/ports/+page.svelte`:
+  - Two number inputs, default 9999 / 8000.
+  - Live `engine.checkPort()` on blur; ✅ free / ❌ in-use-by-PID inline.
+  - "Advanced" disclosure (S28-territory): exposes secret-file paths
+    and a placeholder "Edit system prompt" button (greyed out — that's
+    the roadmap "Custom system prompts" item).
+  - "Continue" disabled while any port shows ❌.
+  Mockup reference: section 4.
+  Commit.
+
+- [ ] **S25: Build / launch pipeline**
+
+  Invoke `/frontend-design-v2` skill.
+  Implement `gui/src/routes/wizard/run/+page.svelte`:
+  - Vertical pipeline of steps: Generating secrets → Rendering compose
+    → Building patched frontend → Pulling images → Starting containers
+    → Waiting for health.
+  - Each step has its own indicator (◯ pending, ⏳ running, ✅ done,
+    ❌ failed) and an optional collapsible log via `LogViewer.svelte`.
+  - The frontend build step gets a determinate progress bar parsed from
+    docker build output (best-effort; fall back to indeterminate).
+  - "Cancel" sends SIGTERM to the running subprocess and rolls back
+    via `engine.compose.down()`.
+  - On success, navigate to `/status`.
+  Mockup reference: section 5.
+  Commit.
+
+- [ ] **S26: Status screen + actions**
+
+  Invoke `/frontend-design-v2` skill.
+  Implement `gui/src/routes/status/+page.svelte`:
+  - Health row per service (`engine.compose.health()` polled every 5 s).
+  - Primary CTA: "Open F13 in browser" (opens default browser at
+    `localhost:${FRONTEND_PORT}` via `tauri://opener`).
+  - Secondary actions: View logs, Stop F13, Full reset.
+  - Each action streams its progress in a sticky toast.
+  Mockup reference: section 6.
+  Commit.
+
+- [ ] **S27: Confirmations + edge cases**
+
+  Invoke `/frontend-design-v2` skill.
+  - Reset confirmation modal (irreversible action — explicit "Type RESET
+    to confirm" or simple double-confirm).
+  - Port-collision modal with a "Pick another port" path.
+  - "F13 is already running" detection on app start with a "Show status"
+    or "Stop & reconfigure" choice.
+  Commit.
+
+- [ ] **S28: Settings panel**
+
+  Invoke `/frontend-design-v2` skill.
+  Implement `gui/src/routes/settings/+page.svelte`:
+  - View generated config (read-only). Copy buttons for the YAML files.
+  - Edit-prompt entry point (still grey/disabled in v1 — wired to the
+    "Custom system prompts" roadmap item; ships as a no-op modal that
+    explains the feature is coming).
+  - Theme toggle (light / dark / system).
+  Commit.
+
+- [ ] **S29: Cross-platform packaging**
+
+  - macOS: `.dmg` and `.app`, code signing optional (document the
+    self-signed instructions).
+  - Linux: `.AppImage` and `.deb`. Verify on Ubuntu 22.04 + 24.04.
+  - Bundle the shell scripts as Tauri sidecar resources so the app
+    works without a separate clone.
+  - GitHub Actions workflow that builds artifacts on push to `main`
+    (the workflow file goes under `gui/.github/workflows/release.yml`,
+    but the .github dir lives at the repo root — confirm the path).
+  Commit.
+
+- [ ] **S30: GUI README + screenshots + CHANGELOG**
+
+  - `gui/README.md`: stack, dev setup, packaging, troubleshooting.
+  - Screenshots / animated GIFs of the wizard flow.
+  - Top-level `README.md`: add a "GUI vs CLI" table so users know
+    which surface to pick.
+  - CHANGELOG.md at repo root: notes for the GUI release.
+  Commit.
+
+- [ ] **S31: End-to-end smoke test**
+
+  - `gui/tests/e2e/smoke.spec.ts` using Tauri's WebDriver mode.
+  - Click through Welcome → Preflight → Inference (mock) → Ports
+    (defaults) → Run pipeline → Status.
+  - Assert a real container stack comes up and `core /health` returns
+    200. Tear down at the end.
+  - Mark as `skip` in CI environments without Docker; runnable locally.
+  Commit.
+
 ---
 
 ## Notes

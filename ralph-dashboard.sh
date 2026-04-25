@@ -6,7 +6,7 @@
 
 WORKDIR="${1:-configurator_v1}"
 REFRESH="${2:-10}"
-STORIES_TOTAL=17  # keep in sync with ralph.sh
+STORIES_TOTAL=32  # keep in sync with ralph.sh
 case "$REFRESH" in
   0) REFRESH_SECS=0 ;;  # one-shot mode: render once and exit
   1|5|10|20|30|60) REFRESH_SECS=$(( REFRESH * 60 )) ;;
