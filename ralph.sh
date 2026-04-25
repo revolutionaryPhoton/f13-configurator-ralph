@@ -105,11 +105,22 @@ Read /PRD.md for all rules. Key points:
 - S16: patched frontend image with feature gating (Phase 6, complete).
 - S17–S31: desktop GUI (Phase 7, in progress). Lives under `gui/`.
   Stack: Tauri 2.x + Svelte 5 + Vite + Tailwind 4 + TypeScript strict.
-  Backpressure for GUI stories:
+  Backpressure for GUI stories (HEADLESS, no display required):
       cd gui && npm run check && npm run test:unit && cargo check
   Plus the original shellcheck + bats for any non-gui changes.
   Invoke /frontend-design-v2 skill before writing any .svelte file
   with UI. Coverage target on TS/Svelte: >= 75%.
+
+  🚫 NEVER run `npm run tauri dev`, `tauri dev`, `cargo run`,
+  `npm run tauri build`, or any Tauri WebDriver E2E inside the loop.
+  The loop is headless; those commands hang waiting for a window.
+  Visual / interactive verification is the maintainer's job, on
+  macOS, outside the loop.
+
+  🍎 GUI validation target is macOS only until Phase 8. The loop
+  exercises the Linux *compile* path (cargo check) inside Docker
+  but no Linux runtime or distribution. Do NOT add .AppImage / .deb
+  / Linux runtime tests to any story in Phase 7.
 CLAUDEMD
   echo -e "${GREEN}Created $WORKDIR/CLAUDE.md${NC}"
 fi
@@ -149,6 +160,15 @@ RULES:
         cd gui && npm run check && npm run test:unit && cargo check
     Plus the shell backpressure if the story also touched non-gui files.
   Both MUST pass before committing.
+- 🚫 NEVER run any of: `npm run tauri dev`, `tauri dev`, `cargo run`,
+  `npm run tauri build`, Tauri WebDriver E2E. The loop runs in a
+  headless Linux Docker container with no display — those commands
+  hang forever waiting for a window. Only headless backpressure
+  (cargo check, vitest, biome, svelte-check) is allowed.
+- 🍎 GUI validation target is macOS only. The loop only exercises
+  the Linux *compile* path because that is where it runs. Do not
+  add Linux-runtime tests, Linux distribution targets, or Linux
+  bundle outputs to any story before Phase 8.
 - Every new .sh file ships with at least one bats test.
 - Every new .svelte/.ts file ships with at least one vitest test.
 - Invoke /frontend-design-v2 skill before writing any .svelte UI file.

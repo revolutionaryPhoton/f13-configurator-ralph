@@ -575,12 +575,24 @@ not a re-implementation.
 **Mandatory rules (extension of Phase 0–6 rules):**
 - Invoke `/frontend-design-v2` skill before writing any `.svelte` file
   with UI. Same as the original frontend rules. No exceptions.
-- Backpressure for GUI stories:
+- Backpressure for GUI stories — **all headless, no display required**:
   ```bash
   cd gui && npm run check && npm run test:unit && cargo check
   ```
   Plus the original shell backpressure (`shellcheck` + `bats`) for any
   changes outside `gui/`.
+- 🚫 **The loop must NEVER run** `npm run tauri dev`, `tauri dev`,
+  `cargo run`, or any Tauri WebDriver E2E command. The loop runs in
+  a headless Docker sandbox with no display — those commands would
+  hang forever waiting for a window, blocking the iteration. Visual
+  and interactive verification is the maintainer's job, on macOS,
+  outside the loop.
+- 🍎 **macOS is the only validated target until Phase 8.** Tauri code
+  is naturally cross-platform and may target Linux/WSL too, but no
+  Linux validation happens inside the loop (the loop has no display)
+  or in CI (CI matrix is macOS-only for Phase 7). Linux build deps
+  may be documented in `gui/CONTRIBUTING.md` for future reference but
+  must NOT be the gating success criterion of any story.
 - Coverage ≥ 75 % on new/modified TS/Svelte files (lower than v1's 80 %
   because Tauri integration paths are hard to unit-test).
 - Never call docker / shell commands directly from Svelte components.
@@ -592,20 +604,40 @@ not a re-implementation.
 
 **Story list (S17 — S31):**
 
-- [ ] **S17: Tauri scaffolding + dev workflow**
+- [ ] **S17: Tauri scaffolding + dev workflow (macOS-validated)**
 
   Inside `configurator_v1/gui/`, scaffold a Tauri 2.x app:
   - `npm create tauri-app@latest` with template `svelte-ts`.
   - Configure: Vite, TypeScript strict, Tailwind CSS 4, Vitest,
     Biome (matching F13 frontend conventions).
-  - Hello-world window opens on `npm run tauri dev`.
-  - Verify on both macOS and Linux (the latter requires
-    `libwebkit2gtk-4.1-dev`, `libglib2.0-dev`, `libgtk-3-dev`,
-    `libssl-dev`, `build-essential`, `librsvg2-dev`, `patchelf` —
-    document in `gui/README.md`).
-  - The ralph image needs Rust + the system deps above. Either extend
-    `ralph.sh`'s apt-install line OR build a derived image. Document
-    the choice in `gui/CONTRIBUTING.md`.
+  - **Loop-side validation (must pass headless):**
+    - `npm install`, `cargo fetch` complete cleanly.
+    - `npm run check` (svelte-check + biome) passes.
+    - `cargo check` passes.
+    - `npm run test:unit` runs (even if just a placeholder test).
+  - **Maintainer-side validation (NOT done inside the loop):**
+    - `npm run tauri dev` opens a hello-world window on macOS.
+    - The maintainer notes any first-run install hiccups in
+      `gui/CONTRIBUTING.md`.
+  - **The ralph image** needs Rust *and* the Tauri compile-time apt
+    deps so `cargo check` passes inside the headless Linux container
+    (Tauri 2's crates link against GTK/WebKit even at compile time;
+    these are needed even when no window is ever opened):
+    - `rustup` install via the official one-liner (`curl … | sh -s --
+      --default-toolchain stable -y`).
+    - apt: `libwebkit2gtk-4.1-dev`, `libglib2.0-dev`, `libgtk-3-dev`,
+      `libssl-dev`, `build-essential`, `librsvg2-dev`, `patchelf`,
+      `libsoup-3.0-dev`, `libjavascriptcoregtk-4.1-dev`.
+    - Add to `ralph.sh`'s `docker run` bootstrap. Document the same
+      list in `gui/CONTRIBUTING.md` for human maintainers on Linux.
+  - **macOS-side maintainer setup** — separately documented in
+    `gui/CONTRIBUTING.md`: Xcode CLI Tools, `rustup`, no extra
+    Homebrew packages required for development. (Tauri uses the system
+    WebKit framework on macOS, which ships with the OS.)
+  - Linux verification of the GUI itself (running, building debug
+    bundle, end-to-end testing) is **deferred to Phase 8**. Phase 7
+    targets macOS for visual / interactive validation; the loop only
+    exercises the Linux compile path because that's where it runs.
   Commit.
 
 - [ ] **S18: Engine adapter (`gui/src/lib/engine.ts`)**
@@ -775,14 +807,12 @@ not a re-implementation.
   - Theme toggle (light / dark / system).
   Commit.
 
-- [ ] **S29: Packaging infrastructure (no distributable artifacts yet)**
+- [ ] **S29: Packaging infrastructure (macOS only, no distributable artifacts)**
 
-  Goal: every piece needed to *eventually* produce signed installers is
-  in place and validated by a local debug build, but **no `.dmg` /
-  `.AppImage` / `.deb` is shipped**. Distribution is intentionally
-  deferred until the maintainer has run the GUI end-to-end on macOS and
-  Linux (out-of-scope; tracked as a future Phase 8 in the PRD's "Out of
-  Scope" section).
+  Goal: every piece needed to *eventually* produce a macOS installer is
+  in place and validated by a local debug build, but **no `.dmg` is
+  shipped**. Linux packaging and any signed artifacts are deferred to a
+  future Phase 8.
 
   In scope for S29:
   - **`gui/src-tauri/tauri.conf.json` bundle config:**
@@ -790,32 +820,33 @@ not a re-implementation.
       with the maintainer), `version`, `category`, `shortDescription`,
       `longDescription`.
     - Bundle target list set to `[]` (intentionally empty, so
-      `tauri build` produces only the binary, no installers).
-  - **App icons** — generate the full Tauri icon set (`gui/src-tauri/icons/`)
-    from a single 1024×1024 source (use `tauri icon` CLI). Verify the
-    generated `.icns` (macOS) and `.png` (Linux) are present and
-    correctly sized.
-  - **Sidecar resource bundling** — declare `bin/f13-config`, `bin/f13-stop`,
-    `bin/f13-reset`, `bin/f13-rebuild-frontend`, plus `lib/` and
-    `templates/`, as Tauri resources. Engine adapter (S18) resolves
-    paths via `app.path().resource_dir()` so it works in both `tauri
-    dev` and `tauri build` modes. Add a Vitest that asserts the
-    resolved path exists in both modes.
-  - **`tauri build --debug`** must succeed on the maintainer's machine
-    (macOS arm64 to start). The output is a runnable `.app` (macOS) or
-    binary (Linux) that the maintainer can launch directly.
-  - **Linux build deps** — document in `gui/CONTRIBUTING.md` the apt
-    list (`libwebkit2gtk-4.1-dev`, `libglib2.0-dev`, `libgtk-3-dev`,
-    `libssl-dev`, `build-essential`, `librsvg2-dev`, `patchelf`).
+      `tauri build` produces only the binary / `.app`, no installers).
+  - **App icons** — generate the full Tauri icon set
+    (`gui/src-tauri/icons/`) from a single 1024×1024 source (use
+    `tauri icon` CLI). The macOS `.icns` is the must-have output;
+    `.png` outputs are produced as a side effect and may be retained
+    for the future Linux phase.
+  - **Sidecar resource bundling** — declare `bin/f13-config`,
+    `bin/f13-stop`, `bin/f13-reset`, `bin/f13-rebuild-frontend`, plus
+    `lib/` and `templates/`, as Tauri resources. Engine adapter (S18)
+    resolves paths via `app.path().resource_dir()` so it works in both
+    `tauri dev` and `tauri build` modes. Add a Vitest that asserts
+    the resolved path exists in both modes.
+  - **`tauri build --debug`** must succeed when run *on the maintainer's
+    macOS machine* (Apple Silicon to start). The output is a runnable
+    `.app` the maintainer can launch directly. **The loop does not run
+    `tauri build`** — only `cargo check` is in headless backpressure.
   - **CI workflow stub** — `.github/workflows/gui-build.yml` exists and
-    runs `tauri build --debug` on macOS-latest and ubuntu-latest, but
-    does NOT publish artifacts. This is the smoke test that the
-    packaging config doesn't drift; releasing is Phase 8's job.
+    runs `tauri build --debug` on `macos-latest` only. Does NOT
+    publish artifacts. This is the smoke test that the packaging
+    config doesn't drift; releasing is Phase 8's job.
 
   **Explicitly out of scope for S29 (deferred to a future Phase 8):**
+  - Linux Tauri builds (any `.AppImage`, `.deb`, or running the GUI on
+    Linux at all). The GUI is macOS-only until the maintainer has
+    Linux validation cycles.
   - Producing signed/notarized `.dmg` for macOS distribution.
-  - Producing `.AppImage` and `.deb` for Linux distribution.
-  - Apple Developer ID signing, notarization, or Linux package signing.
+  - Apple Developer ID signing, notarization.
   - GitHub Releases automation.
   - Auto-update flow.
   Commit.
@@ -829,14 +860,22 @@ not a re-implementation.
   - CHANGELOG.md at repo root: notes for the GUI release.
   Commit.
 
-- [ ] **S31: End-to-end smoke test**
+- [ ] **S31: End-to-end smoke test (maintainer-only, not loop-runnable)**
 
   - `gui/tests/e2e/smoke.spec.ts` using Tauri's WebDriver mode.
   - Click through Welcome → Preflight → Inference (mock) → Ports
     (defaults) → Run pipeline → Status.
   - Assert a real container stack comes up and `core /health` returns
     200. Tear down at the end.
-  - Mark as `skip` in CI environments without Docker; runnable locally.
+  - **Runs on the maintainer's macOS machine only.** Tauri WebDriver
+    needs a display and a real Tauri app process — neither exists in
+    the loop's headless Linux Docker container. The test is gated
+    with an environment guard (`F13_E2E=1` or similar) so it doesn't
+    run during loop iterations or in macOS-only CI either (the CI
+    runner has no Docker for the F13 stack).
+  - Story acceptance: the test file exists, is documented in
+    `gui/tests/e2e/README.md`, and the maintainer ran it once locally
+    and recorded the output.
   Commit.
 
 ---
@@ -870,3 +909,7 @@ not a re-implementation.
   signed/notarized artifacts for distribution is deferred to a future
   Phase 8 — only kicked off after the maintainer has run the GUI end
   to end on macOS and Linux locally.
+- Linux GUI validation in Phase 7. The loop only exercises the Linux
+  *compile* path (`cargo check` inside Docker); running the actual
+  Tauri app on Linux happens in Phase 8 once the maintainer has Linux
+  test cycles. Until then, the GUI is macOS-only.
