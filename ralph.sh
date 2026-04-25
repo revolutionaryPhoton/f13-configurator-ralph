@@ -15,7 +15,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKDIR="configurator_v1"
 PROGRESS="PROGRESS.md"
 LOGDIR="ralph-logs"
-STORIES_TOTAL=32  # S00..S31 (Phase 6 = S00–S16 shell, Phase 7 = S17–S31 GUI)
+STORIES_TOTAL=34  # S00..S31 GUI + S32, S34 (Phase 7.5 loop-verifiable). HF1–HF3 are hand-fixes outside the loop count.
 
 # ── Colors ──
 RED='\033[0;31m'
@@ -334,7 +334,14 @@ run_claude_docker() {
     --network host \
     node:24-bookworm-slim \
     bash -c '
-      apt-get update -qq && apt-get install -y -qq git shellcheck bats gettext-base >/dev/null 2>&1
+      apt-get update -qq && apt-get install -y -qq \
+        git shellcheck bats gettext-base \
+        libwebkit2gtk-4.1-dev libglib2.0-dev libgtk-3-dev libssl-dev \
+        build-essential librsvg2-dev patchelf libsoup-3.0-dev \
+        libjavascriptcoregtk-4.1-dev curl wget >/dev/null 2>&1
+      # Install Rust stable for cargo check (required by S17+ GUI stories)
+      curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- \
+        --default-toolchain stable -y --no-modify-path >/dev/null 2>&1 || true
       npm install -g @anthropic-ai/claude-code >/dev/null 2>&1
 
       RALPH_USER=node
@@ -359,7 +366,15 @@ run_claude_docker() {
       chmod 644 /PRD.md
 
       export HOME="$RALPH_HOME"
-      cat /tmp/prompt.txt | su "$RALPH_USER" -c "stdbuf -oL claude --dangerously-skip-permissions --verbose --output-format stream-json -p"
+      # Make Rust available (installed above as root, link to user home)
+      if [ -d /root/.cargo/bin ]; then
+        mkdir -p "$RALPH_HOME/.cargo/bin"
+        cp -r /root/.cargo/bin/* "$RALPH_HOME/.cargo/bin/" 2>/dev/null || true
+        cp -r /root/.cargo/env "$RALPH_HOME/.cargo/env" 2>/dev/null || true
+        cp -r /root/.rustup "$RALPH_HOME/.rustup" 2>/dev/null || true
+        chown -R "$HOST_UID:$HOST_GID" "$RALPH_HOME/.cargo" "$RALPH_HOME/.rustup" 2>/dev/null || true
+      fi
+      cat /tmp/prompt.txt | su "$RALPH_USER" -c "PATH=\$HOME/.cargo/bin:\$PATH stdbuf -oL claude --dangerously-skip-permissions --verbose --output-format stream-json -p"
     '
   rm -f "$prompt_file"
 }

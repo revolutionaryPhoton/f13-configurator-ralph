@@ -878,6 +878,133 @@ not a re-implementation.
     and recorded the output.
   Commit.
 
+### Phase 7.5: GUI bug-fixing pass (loop-verifiable subset)
+
+Two of the five v0.2.x bugs can be verified end-to-end by the loop's
+headless checks (bash + bats + cargo check + vitest). The remaining
+three need a real running app to prove the fix worked, so they're
+broken out into the *Maintainer hand-fixes* section below and worked
+on interactively between the maintainer and me — not by the loop.
+
+The same Phase 7 mandatory rules apply (headless backpressure,
+no `tauri dev` / `cargo run` / window-opening commands, macOS-only
+target, invoke `/frontend-design-v2` before any new `.svelte` UI).
+Each story lands as its own `BF [gui]` commit.
+
+- [ ] **S32: `f13-reset` honours `F13_GENERATED_DIR`**
+
+  **Bug:** `bin/f13-reset` only wipes `configurator_v1/generated/`
+  (the shell wizard's default `GEN_DIR`). When the GUI invokes the
+  reset path it writes to `gui/src-tauri/target/debug/generated/`,
+  so the GUI's stale state survives every reset attempt and re-runs
+  hit the half-rendered config.
+
+  **Fix:**
+  - `bin/f13-reset` already references `F13_GENERATED_DIR` via
+    `${F13_GENERATED_DIR:-${SCRIPT_DIR}/../generated}` — verify the
+    plumbing actually wipes a custom directory and add a bats test
+    that creates a fixture dir under `mktemp`, runs
+    `F13_GENERATED_DIR=… ./bin/f13-reset`, asserts the dir is gone.
+  - Apply the same audit to `bin/f13-stop`.
+  - The engine adapter (`gui/src/lib/engine.ts compose.reset`)
+    already passes `F13_GENERATED_DIR` — confirm via vitest that
+    the env-var actually reaches the spawned subprocess.
+
+  **Loop-verifiable acceptance:** new bats test passes; existing
+  vitest passes; `shellcheck` clean.
+
+- [ ] **S34: Wizard's `keep` path emits per-stage events**
+
+  **Bug:** when `.state` exists, the wizard skips
+  secrets/render/build/pull/health and only emits
+  `{type:"step", name:"start", ...}`. The GUI's six-stage pipeline
+  graph stays pending forever — looks "stuck" even though docker
+  compose is actually starting underneath.
+
+  **Fix (CLI side, in `bin/f13-config`):**
+  - In `wizard()`'s `keep` branch, before calling `compose::up`,
+    emit synthetic `{type:"step", name:<each prior stage>,
+    status:"done", skipped:true}` events so the GUI can fill the
+    graph instantly.
+  - Add a helper `events::emit_skipped <name>` in
+    `lib/events.sh` to keep the JSON shape consistent.
+  - Bats test: run the wizard with a stale state file +
+    `--emit-events` and assert every stage's `done` event with
+    `skipped:true` appears in stdout.
+
+  **Fix (GUI side, in `gui/src/routes/wizard/run/+page.svelte`):**
+  - Treat `step.skipped === true` as instantly done — no progress
+    animation. Render a faded checkmark with a tooltip
+    "skipped — existing state".
+  - Vitest: feed a fixture event stream containing skipped events
+    and assert the pipeline graph fills without delay.
+
+  **Loop-verifiable acceptance:** new bats + new vitest pass;
+  `cargo check`, `npm run check` clean.
+
+---
+
+## Maintainer hand-fixes (between v0.2.x and v0.3.0)
+
+These three sit outside the loop because their acceptance criteria
+require seeing the actual running app. Worked interactively between
+the maintainer and me; each lands as a `BF [gui]` commit. They count
+toward v0.2.2 alongside the loop's S32 + S34 — when all five are
+shipped, the macOS GUI is considered the first trustable desktop
+release.
+
+- **HF1: GUI uses an absolute `generatedDir`.** The current relative
+  default (`"./generated"`) resolves against the Tauri dev process's
+  CWD (`gui/src-tauri/target/debug/`) instead of an obvious path
+  under `configurator_v1/`. Fix: add a Rust `get_generated_dir()`
+  command that mirrors `get_bin_dir()`; `bootstrap.ts` reads it
+  once and stashes it; all wizard pages default to that constant.
+  **Hand-verifiable:** after a fresh GUI run, the stack lives at
+  `configurator_v1/generated/` and `./bin/f13-stop` from the shell
+  tears it down.
+
+- **HF2: Cancel button actually aborts the subprocess.** Currently
+  `handleCancel()` only flips a JS-side `cancelToken`; the bash
+  process keeps running and can finish a half-built docker stack.
+  Fix: `tauriRunner.ts` returns a kill handle from `runner.run()`;
+  the engine propagates it through `runWizardNonInteractive` and
+  `compose.up`; the run page calls `kill()` then `compose.down()`.
+  **Hand-verifiable:** Cancel mid-pipeline drops the bash process
+  within 2s (visible via `ps -ef | grep f13-config`) and leaves
+  no orphan containers (`docker ps`).
+
+- **HF3: Eliminate sporadic "pull access denied" on `f13-frontend`.**
+  Compose occasionally tries to pull the locally built
+  `f13-frontend:configurator-v1` image instead of using the local
+  one. Fix candidates: add `pull_policy: never` to the frontend
+  service in the compose template; add a `docker image inspect`
+  precondition before `compose::up` that surfaces a clear
+  "frontend image missing" error instead of letting compose
+  blunder into a failed pull.
+  **Hand-verifiable:** ten consecutive fresh cycles
+  (reset → setup → status → reset) produce zero pull-related
+  compose errors. Cannot be automated without spinning real
+  containers in CI.
+
+---
+
+## Release roadmap
+
+The PRD's story sequence maps onto the GitHub release line as follows:
+
+| Release | Phase(s) | Status | Highlight |
+|---|---|---|---|
+| v0.1.0 | Phase 0–6 (S00–S16) | shipped | Shell wizard + patched-frontend image gating |
+| v0.2.0 | Phase 7 (S17–S31) + wiring fixes | shipped | Tauri 2 + Svelte 5 desktop GUI, click-through works |
+| v0.2.1 | Design polish (no new phase) | shipped | Zinc visual direction across all seven screens |
+| v0.2.2 | **Phase 7.5 (S32 + S34) + HF1–HF3** | **planned** | macOS GUI declared stable: loop fixes the two bash/event-emission bugs, maintainer hand-fixes the three runtime-verification ones |
+| v0.3.0 | **Phase 8 (Linux runtime)** | planned | Validate the GUI end-to-end on Linux (Ubuntu 22.04 / 24.04): apt deps, `host.docker.internal:host-gateway`, WebKit2GTK quirks, file-permission edges. No new screens, just runtime parity. |
+| v0.4.0 | **Phase 9 (signed distributables)** | planned | Produce signed `.dmg` (macOS notarization), `.AppImage` and `.deb` (Linux), GitHub Releases automation, optional auto-update |
+
+Phase 8 only kicks off after v0.2.2 lands and the macOS GUI is
+considered the first *trustable* desktop release. Phase 9 is gated
+on both macOS and Linux runtimes being stable.
+
 ---
 
 ## Notes
