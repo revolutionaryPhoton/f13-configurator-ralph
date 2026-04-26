@@ -1059,7 +1059,19 @@ user the same way.
 Mandatory rules unchanged from Phase 7. Backpressure stays
 headless. No new Svelte UI; this is plumbing.
 
-- [ ] **S37: WebKit2GTK + apt prerequisites doc**
+> **Status (v0.3.0):** S37–S40 shipped via interactive
+> maintainer sessions on a real WSL2 Ubuntu 22.04 box. The
+> ralph loop did NOT drive these; the bugs were diagnostic-
+> heavy and benefited from a hand-on-keyboard back-and-forth
+> with a running app. The GUI is now mostly stable on Linux
+> for daily local use — first-time setup, Stop/Start cycles,
+> reset, mock and host-Ollama (including cloud-tagged
+> models) all work end-to-end. Loose ends remain (HF4 below,
+> plus likely a few neighbours of it that surface once HF4 is
+> fixed); none block normal use. Re-running the loop on these
+> stories is not necessary.
+
+- [x] **S37: WebKit2GTK + apt prerequisites doc** ✅ shipped in v0.3.0
 
   Document and validate the apt list needed to run the existing
   Tauri 2 + Svelte 5 GUI on Ubuntu 22.04 and 24.04. Currently
@@ -1097,16 +1109,19 @@ headless. No new Svelte UI; this is plumbing.
      `wslview` to route `xdg-open` through to the Windows-side
      default browser. apt prereq, no code fix.
 
-- [ ] **S38: `host.docker.internal` on Linux**
+- [x] **S38: `host.docker.internal` on Linux** ✅ shipped in v0.3.0
 
-  The compose template already injects
-  `extra_hosts: host.docker.internal:host-gateway` for the chat
-  service (Docker 20.10+). Confirm this works under WSL2 + native
-  Linux for both mock and Ollama backends. Add a preflight check
-  that warns if the host running the GUI does not have a Docker
-  daemon supporting `host-gateway`.
+  Confirmed working under WSL2 Ubuntu 22.04 + Docker Desktop
+  for both mock and Ollama backends — the
+  `extra_hosts: host.docker.internal:host-gateway` line that
+  the compose template already injects does the right thing.
+  No code change required. The proposed preflight warning for
+  ancient Docker daemons (<20.10, missing `host-gateway`) was
+  not added: 20.10 was released 2020-12 and the existing
+  `docker compose` preflight already trips on installs that
+  old, so the warning would be redundant.
 
-- [ ] **S39: File-permission edges**
+- [x] **S39: File-permission edges** ✅ shipped in v0.3.0
 
   macOS file ops are forgiving; Linux exposes things macOS
   silently fixes. Audit:
@@ -1130,12 +1145,40 @@ headless. No new Svelte UI; this is plumbing.
   - The Tauri-spawned bash subprocess inherits a sane PATH /
     HOME / TMPDIR on Linux launches.
 
-- [ ] **S40: Linux smoke pass**
+- [x] **S40: Linux smoke pass** ✅ shipped in v0.3.0
 
-  Execute the S31 E2E smoke test on Ubuntu 22.04 and 24.04. Land
-  any small Svelte fixes for WebKit2GTK rendering quirks
-  surfaced by S37. Capture per-screen screenshots from a Linux
-  run and add them to `gui/README.md` alongside the macOS ones.
+  Maintainer ran the full wizard happy-path manually on WSL2
+  Ubuntu 22.04 (mock backend, default ports, edit cycle, Stop
+  / Start, full reset). Every documented flow worked. Small
+  Svelte/runtime fixes that landed during the pass:
+  - `BF [secrets]` 0644 file mode for bind-mount readability
+    on Linux (S39 driver).
+  - `BF [gui]` `apply_linux_runtime_defaults()` silences libEGL
+    `/dev/dri/*` warnings + WebKit DMA-BUF / compositor
+    fallback (S37 driver).
+  - `BF [gui]` Tailwind v4 + `<script lang="ts">` interaction
+    in `ProgressBar.svelte` — keyframe hoisted to global CSS
+    so the file has no `<style>` block for Tailwind to
+    misparse (orthogonal but surfaced during Linux bringup).
+  - `BF [wizard]` `edit` reuses the existing
+    `feedback_db.secret` so the postgres volume + new secret
+    stay aligned across re-runs.
+  - Plus image-pin hygiene (chat v1.2.0, core v2.0.0,
+    postgres 17, frontend git tag v2.0.0) and a
+    `f13-frontend:v2.0.0_based` rename so the local image
+    name reflects the upstream ref.
+
+  Per-screen Linux screenshots for `gui/README.md` were not
+  captured — deferred to whenever the maintainer has time;
+  the macOS ones still represent the visual surface
+  faithfully (Linux runs through the same WebKit2GTK and
+  the same design tokens).
+
+  Known loose end: HF4 (reconfigure-flow no-op on backend
+  swap) was discovered during this pass; it doesn't block
+  normal use but is the unblocker for "near-instant model
+  swaps for a running F13 stack" — see Maintainer hand-fixes
+  above.
 
 ### Phase 9: Signed distributables + bundled-mode data paths
 
@@ -1227,13 +1270,15 @@ The PRD's story sequence maps onto the GitHub release line as follows:
 | v0.2.0 | Phase 7 (S17–S31) + wiring fixes | shipped | Tauri 2 + Svelte 5 desktop GUI, click-through works |
 | v0.2.1 | Design polish (no new phase) | shipped | Zinc visual direction across all seven screens |
 | v0.2.2 | Phase 7.5 (S32 + S34) + HF1 + UX polish + dependabot | shipped | macOS GUI mostly stable for daily local use. Loop landed S32 + S34; HF1 done across four iterations; Stop/Start cycle, Stopped badge, Reset Enter-key, Ollama free-text/cloud links; cookie 0.7 override + 2 Rust alerts dismissed; 288/288 vitest. HF2 + HF3 deferred (don't block normal use). |
-| v0.3.0 | **Phase 8 (S37–S40)** Linux runtime parity | planned | Validate the existing GUI end-to-end on Ubuntu 22.04 / 24.04: WebKit2GTK quirks, host.docker.internal on Linux, file-permission edges. No new screens. |
+| v0.3.0 | **Phase 8 (S37–S40)** Linux runtime parity + image pinning + UX polish | shipped | GUI mostly stable on macOS + Linux (WSL2 Ubuntu 22.04 validated). Maintainer hand-fixes: secret-file mode 0644 for Linux bind-mounts (S39), `apply_linux_runtime_defaults()` silences libEGL/DMA-BUF warnings (S37), `host.docker.internal:host-gateway` confirmed under WSL2 + Docker Desktop (S38), `feedback_db.secret` round-trips through `edit` so postgres volume stays aligned, Tailwind v4 ProgressBar keyframe hoist, embedding-model alert in Ollama picker, soft warnings against embedding selections, image pins (core v2.0.0, chat v1.2.0, postgres 17, frontend git ref v2.0.0 → `f13-frontend:v2.0.0_based`), `frontend::get_source` always clones the pinned tag. HF4 (reconfigure no-op on backend swap) found and documented; doesn't block normal use. Ralph loop NOT used for any of this — interactive maintainer + Claude Code sessions on the actual Linux box. |
 | v0.4.0 | **Phase 9 (S41–S47)** Signed distributables + bundled-mode data paths | planned | `appLocalDataDir` for bundled installs (replaces dev-only path), `f13-stop`/`f13-reset` discovery, signed `.dmg`, `.AppImage` + `.deb`, GitHub Releases automation, optional auto-update |
 
-Phase 8 starts immediately on the Linux machine; HF2 + HF3 land
-when convenient as a v0.2.3 patch (no schedule pressure since
-neither blocks normal use). Phase 9 is gated on both macOS and
-Linux runtimes being stable.
+Linux runtime parity (Phase 8) shipped in v0.3.0 via
+maintainer-side WSL2 testing. HF2, HF3, HF4 land when
+convenient as v0.3.x patches — none block normal use. Phase 9
+is no longer gated on Linux runtime stability (that gate
+cleared in v0.3.0); it's gated on the maintainer wanting to
+ship signed installer artifacts.
 
 ---
 
