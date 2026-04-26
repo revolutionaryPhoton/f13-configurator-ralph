@@ -986,6 +986,130 @@ release.
   compose errors. Cannot be automated without spinning real
   containers in CI.
 
+### Phase 8: Linux runtime parity (no new screens)
+
+Goal: validate the existing Phase 7 / 7.5 GUI end-to-end on Linux
+with no visual changes — runtime parity only. The GUI works on
+the maintainer's macOS box; this phase makes it work for a Linux
+user the same way.
+
+Mandatory rules unchanged from Phase 7. Backpressure stays
+headless. No new Svelte UI; this is plumbing.
+
+- [ ] **S37: WebKit2GTK + apt prerequisites doc**
+
+  Document and validate the apt list needed to run the existing
+  Tauri 2 + Svelte 5 GUI on Ubuntu 22.04 and 24.04. Currently
+  `gui/CONTRIBUTING.md` lists the *compile* deps (libwebkit2gtk-
+  4.1-dev etc.) for `cargo check` inside Docker — Phase 8 adds
+  the *runtime* deps and tests `tauri dev` on a real Ubuntu box.
+  Note any WebKit2GTK rendering quirks the existing screens hit
+  (font metrics, animation easing, scrollbar styling).
+
+- [ ] **S38: `host.docker.internal` on Linux**
+
+  The compose template already injects
+  `extra_hosts: host.docker.internal:host-gateway` for the chat
+  service (Docker 20.10+). Confirm this works under WSL2 + native
+  Linux for both mock and Ollama backends. Add a preflight check
+  that warns if the host running the GUI does not have a Docker
+  daemon supporting `host-gateway`.
+
+- [ ] **S39: File-permission edges**
+
+  macOS file ops are forgiving; Linux exposes things macOS
+  silently fixes. Audit:
+  - `secret::write` chmod 600 on Linux (already tested; reverify).
+  - `compose:up` mounts: confirm UID/GID alignment between the
+    host user and the postgres / core containers' expected user.
+  - The Tauri-spawned bash subprocess inherits a sane PATH /
+    HOME / TMPDIR on Linux launches.
+
+- [ ] **S40: Linux smoke pass**
+
+  Execute the S31 E2E smoke test on Ubuntu 22.04 and 24.04. Land
+  any small Svelte fixes for WebKit2GTK rendering quirks
+  surfaced by S37. Capture per-screen screenshots from a Linux
+  run and add them to `gui/README.md` alongside the macOS ones.
+
+### Phase 9: Signed distributables + bundled-mode data paths
+
+Two intertwined deliverables: produce the actual installer
+artifacts AND fix the dev-only path assumptions baked into HF1.
+
+The current GUI uses `dev_workspace_root() / "generated"`
+(== `configurator_v1/generated/`) as its data path. That only
+works in a dev checkout — bundled `.app` / `.AppImage` /
+`.deb` installs have no such tree. Phase 9 swaps the bundled
+branch over to the OS-canonical user-data location and teaches
+`f13-stop` / `f13-reset` to discover it.
+
+- [ ] **S41: `appLocalDataDir` for bundled installs**
+
+  - Rust: `get_generated_dir()`'s bundled branch returns
+    `app.path().app_local_data_dir().join("generated")`.
+    macOS: `~/Library/Application Support/de.f13-os.configurator/generated/`.
+    Linux: `~/.local/share/de.f13-os.configurator/generated/`.
+    Dev branch unchanged (still `configurator_v1/generated/`).
+  - Same treatment for `get_bin_dir()` — bundled returns
+    `resource_dir/bin`, dev returns `configurator_v1/bin`.
+  - Sidecar resources (`bin/`, `lib/`, `templates/`) bundled via
+    Tauri's `resources` config (already in place from S29).
+
+- [ ] **S42: Discovery in `f13-stop` / `f13-reset`**
+
+  Today the shell scripts only look at their own `${SCRIPT_DIR}/
+  ../generated`. Extend with:
+  1. `${F13_GENERATED_DIR}` env override (already honoured).
+  2. Auto-discover from a known list of locations:
+     - `${F13_GENERATED_DIR}` if set
+     - `${SCRIPT_DIR}/../generated` (CLI-created stack)
+     - `~/Library/Application Support/de.f13-os.configurator/generated`
+     - `~/.local/share/de.f13-os.configurator/generated`
+  3. Pick the first path containing a `docker-compose.yml`.
+  4. If multiple match, error and require explicit
+     `--gen-dir <path>` or env override.
+
+  Bats tests for each branch.
+
+- [ ] **S43: Code signing (macOS)**
+
+  - Apple Developer ID Application certificate.
+  - `tauri.conf.json bundle.macOS.signingIdentity`.
+  - Notarization workflow (notarytool / app-specific password).
+  - Document the maintainer setup in `gui/SIGNING.md`
+    (gitignored — has cert names + workflow but no secrets).
+
+- [ ] **S44: `.dmg` production**
+
+  Set `bundle.targets` to include `dmg`. Signed + notarized
+  output. Smoke test on a clean macOS box (no developer tools)
+  to confirm Gatekeeper accepts it. Document the install flow
+  in README's "Quickstart" with a download link.
+
+- [ ] **S45: `.AppImage` and `.deb` production**
+
+  - AppImage tooling (linuxdeploy + appimagetool).
+  - Debian control metadata (postinst / postrm scripts that
+    register `de.f13-os.configurator` desktop file).
+  - Smoke test on Ubuntu 22.04 + 24.04.
+  - Document in README.
+
+- [ ] **S46: GitHub Releases automation**
+
+  - `.github/workflows/release.yml`: on tag push (`v*`), build
+    `.dmg` on macos-latest + `.AppImage`/`.deb` on
+    ubuntu-latest, sign / notarize, attach to a draft Release.
+  - Maintainer reviews + publishes the Release manually
+    (no auto-publish).
+
+- [ ] **S47: Optional auto-update**
+
+  Tauri's updater plugin — opt-in via a settings toggle.
+  Update manifest hosted in the GitHub Release (signed). If
+  this proves more work than the rest of Phase 9 combined,
+  defer to v0.5.0.
+
 ---
 
 ## Release roadmap
@@ -998,8 +1122,8 @@ The PRD's story sequence maps onto the GitHub release line as follows:
 | v0.2.0 | Phase 7 (S17–S31) + wiring fixes | shipped | Tauri 2 + Svelte 5 desktop GUI, click-through works |
 | v0.2.1 | Design polish (no new phase) | shipped | Zinc visual direction across all seven screens |
 | v0.2.2 | **Phase 7.5 (S32 + S34) + HF1–HF3** | **planned** | macOS GUI declared stable: loop fixes the two bash/event-emission bugs, maintainer hand-fixes the three runtime-verification ones |
-| v0.3.0 | **Phase 8 (Linux runtime)** | planned | Validate the GUI end-to-end on Linux (Ubuntu 22.04 / 24.04): apt deps, `host.docker.internal:host-gateway`, WebKit2GTK quirks, file-permission edges. No new screens, just runtime parity. |
-| v0.4.0 | **Phase 9 (signed distributables)** | planned | Produce signed `.dmg` (macOS notarization), `.AppImage` and `.deb` (Linux), GitHub Releases automation, optional auto-update |
+| v0.3.0 | **Phase 8 (S37–S40)** Linux runtime parity | planned | Validate the existing GUI end-to-end on Ubuntu 22.04 / 24.04: WebKit2GTK quirks, host.docker.internal on Linux, file-permission edges. No new screens. |
+| v0.4.0 | **Phase 9 (S41–S47)** Signed distributables + bundled-mode data paths | planned | `appLocalDataDir` for bundled installs (replaces dev-only path), `f13-stop`/`f13-reset` discovery, signed `.dmg`, `.AppImage` + `.deb`, GitHub Releases automation, optional auto-update |
 
 Phase 8 only kicks off after v0.2.2 lands and the macOS GUI is
 considered the first *trustable* desktop release. Phase 9 is gated

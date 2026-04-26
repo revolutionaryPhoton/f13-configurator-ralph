@@ -15,7 +15,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKDIR="configurator_v1"
 PROGRESS="PROGRESS.md"
 LOGDIR="ralph-logs"
-STORIES_TOTAL=34  # S00..S31 GUI + S32, S34 (Phase 7.5 loop-verifiable). HF1–HF3 are hand-fixes outside the loop count.
+STORIES_TOTAL=45  # S00..S31 GUI + S32, S34 (7.5) + S37..S40 (Phase 8) + S41..S47 (Phase 9). HF1–HF3 are hand-fixes outside this count.
 
 # ── Colors ──
 RED='\033[0;31m'
