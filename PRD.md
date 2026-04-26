@@ -1021,7 +1021,21 @@ headless. No new Svelte UI; this is plumbing.
 
   macOS file ops are forgiving; Linux exposes things macOS
   silently fixes. Audit:
-  - `secret::write` chmod 600 on Linux (already tested; reverify).
+  - `secret::write` ships with chmod 644 (was 600). The `core`
+    image runs as uid 999, gid 0, and on Linux bind-mounts
+    preserve real UIDs — so 0600 files owned by the host user
+    were unreadable inside the container, manifesting as
+    `PermissionError: [Errno 13] Permission denied:
+    '/core/secrets/feedback_db.secret'` on `core` startup.
+    Docker Desktop on macOS papers over this with its userspace
+    bind-mount shim, which is why the bug only surfaced under
+    WSL2 / native Linux. The 0644 mode is uniform across both
+    OSes; host-side gating is provided by the parent
+    `generated/` directory living inside `$HOME`. Same fix
+    applied to the inline `chmod 600` on `feedback_db.secret`
+    in `bin/f13-config` (which bypasses `secret::write`).
+    `lib/state.sh`'s `chmod 600` on `.state` is unchanged —
+    that file is host-only, never bind-mounted.
   - `compose:up` mounts: confirm UID/GID alignment between the
     host user and the postgres / core containers' expected user.
   - The Tauri-spawned bash subprocess inherits a sane PATH /
