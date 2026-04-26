@@ -1008,6 +1008,34 @@ headless. No new Svelte UI; this is plumbing.
   Note any WebKit2GTK rendering quirks the existing screens hit
   (font metrics, animation easing, scrollbar styling).
 
+  **Known quirks (WSL2 + Ubuntu).** Three macOS-free-lunch
+  items that have to be installed or worked around explicitly,
+  documented in `gui/CONTRIBUTING.md`:
+
+  1. **libEGL `/dev/dri/*` probe failures.** WebKit2GTK and Mesa
+     probe the DRI nodes on startup; on WSL2 they are
+     `root:root 0600` (the real GPU bridge is `/dev/dxg`), so
+     `libEGL warning: failed to open …` spams stderr while
+     Mesa falls back to software rendering. The runtime forces
+     the software path explicitly via
+     `apply_linux_runtime_defaults()` in
+     `src-tauri/src/lib.rs`: `LIBGL_ALWAYS_SOFTWARE=1`,
+     `WEBKIT_DISABLE_DMABUF_RENDERER=1`,
+     `WEBKIT_DISABLE_COMPOSITING_MODE=1`. Each is only set
+     when the user hasn't already exported it.
+
+  2. **Color-emoji font missing.** Emoji glyphs (🧪 🦙 …) used
+     across the wizard render as missing-glyph boxes without
+     `fonts-noto-color-emoji` installed. apt prereq, no code
+     fix.
+
+  3. **`xdg-open` no-op on WSL2.** The Status screen's "Open
+     F13 in browser" button calls `tauri-plugin-opener` which
+     on Linux invokes `xdg-open`. WSL2 has no graphical
+     browser registered by default — `wslu` (apt) provides
+     `wslview` to route `xdg-open` through to the Windows-side
+     default browser. apt prereq, no code fix.
+
 - [ ] **S38: `host.docker.internal` on Linux**
 
   The compose template already injects
