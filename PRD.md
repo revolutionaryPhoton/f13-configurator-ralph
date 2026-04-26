@@ -891,7 +891,7 @@ no `tauri dev` / `cargo run` / window-opening commands, macOS-only
 target, invoke `/frontend-design-v2` before any new `.svelte` UI).
 Each story lands as its own `BF [gui]` commit.
 
-- [ ] **S32: `f13-reset` honours `F13_GENERATED_DIR`**
+- [x] **S32: `f13-reset` honours `F13_GENERATED_DIR`** ✅ shipped in v0.2.2 (`bba394d`)
 
   **Bug:** `bin/f13-reset` only wipes `configurator_v1/generated/`
   (the shell wizard's default `GEN_DIR`). When the GUI invokes the
@@ -913,7 +913,7 @@ Each story lands as its own `BF [gui]` commit.
   **Loop-verifiable acceptance:** new bats test passes; existing
   vitest passes; `shellcheck` clean.
 
-- [ ] **S34: Wizard's `keep` path emits per-stage events**
+- [x] **S34: Wizard's `keep` path emits per-stage events** ✅ shipped in v0.2.2 (`b192f98`)
 
   **Bug:** when `.state` exists, the wizard skips
   secrets/render/build/pull/health and only emits
@@ -948,39 +948,41 @@ Each story lands as its own `BF [gui]` commit.
 
 These three sit outside the loop because their acceptance criteria
 require seeing the actual running app. Worked interactively between
-the maintainer and me; each lands as a `BF [gui]` commit. They count
-toward v0.2.2 alongside the loop's S32 + S34 — when all five are
-shipped, the macOS GUI is considered the first trustable desktop
-release.
+the maintainer and me; each lands as a `BF [gui]` commit.
 
-- **HF1: GUI uses an absolute `generatedDir`.** The current relative
-  default (`"./generated"`) resolves against the Tauri dev process's
-  CWD (`gui/src-tauri/target/debug/`) instead of an obvious path
-  under `configurator_v1/`. Fix: add a Rust `get_generated_dir()`
-  command that mirrors `get_bin_dir()`; `bootstrap.ts` reads it
-  once and stashes it; all wizard pages default to that constant.
-  **Hand-verifiable:** after a fresh GUI run, the stack lives at
-  `configurator_v1/generated/` and `./bin/f13-stop` from the shell
-  tears it down.
+HF1 shipped in v0.2.2 alongside S32 + S34 and a chunk of UX polish.
+HF2 + HF3 are still open — neither blocks normal use, so they were
+deferred past v0.2.2 to a later v0.2.x patch.
 
-- **HF2: Cancel button actually aborts the subprocess.** Currently
-  `handleCancel()` only flips a JS-side `cancelToken`; the bash
-  process keeps running and can finish a half-built docker stack.
-  Fix: `tauriRunner.ts` returns a kill handle from `runner.run()`;
-  the engine propagates it through `runWizardNonInteractive` and
-  `compose.up`; the run page calls `kill()` then `compose.down()`.
-  **Hand-verifiable:** Cancel mid-pipeline drops the bash process
-  within 2s (visible via `ps -ef | grep f13-config`) and leaves
-  no orphan containers (`docker ps`).
+- [x] **HF1: GUI uses an absolute `generatedDir`.** ✅ shipped in
+  v0.2.2 across four iterations (`6510ca1` → `d2defe1` → `387699c` →
+  `18cbacf`). Settled on detecting dev mode by the executable's own
+  path (`target/debug/` or `target/release/`) since Tauri symlinks
+  resources into the dev binary's directory and made sentinel-file
+  checks unreliable. After this, GUI-launched stacks land at
+  `configurator_v1/generated/` and `./bin/f13-stop` from a terminal
+  Just Works without env overrides.
 
-- **HF3: Eliminate sporadic "pull access denied" on `f13-frontend`.**
-  Compose occasionally tries to pull the locally built
-  `f13-frontend:configurator-v1` image instead of using the local
-  one. Fix candidates: add `pull_policy: never` to the frontend
-  service in the compose template; add a `docker image inspect`
-  precondition before `compose::up` that surfaces a clear
-  "frontend image missing" error instead of letting compose
-  blunder into a failed pull.
+- [ ] **HF2: Cancel button actually aborts the subprocess.** Open.
+  Currently `handleCancel()` only flips a JS-side `cancelToken`;
+  the bash process keeps running and can finish a half-built docker
+  stack. Fix: `tauriRunner.ts` returns a kill handle from
+  `runner.run()`; the engine propagates it through
+  `runWizardNonInteractive` and `compose.up`; the run page calls
+  `kill()` then `compose.down()`. **Hand-verifiable:** Cancel
+  mid-pipeline drops the bash process within 2s (visible via
+  `ps -ef | grep f13-config`) and leaves no orphan containers
+  (`docker ps`).
+
+- [ ] **HF3: Eliminate sporadic "pull access denied" on
+  `f13-frontend`.** Open. Compose occasionally tries to pull the
+  locally built `f13-frontend:configurator-v1` image instead of
+  using the local one. Not seen since HF1 v4 landed but the
+  precondition guard isn't in place yet. Fix candidates: add
+  `pull_policy: never` to the frontend service in the compose
+  template; add a `docker image inspect` precondition before
+  `compose::up` that surfaces a clear "frontend image missing"
+  error instead of letting compose blunder into a failed pull.
   **Hand-verifiable:** ten consecutive fresh cycles
   (reset → setup → status → reset) produce zero pull-related
   compose errors. Cannot be automated without spinning real
@@ -1121,13 +1123,14 @@ The PRD's story sequence maps onto the GitHub release line as follows:
 | v0.1.0 | Phase 0–6 (S00–S16) | shipped | Shell wizard + patched-frontend image gating |
 | v0.2.0 | Phase 7 (S17–S31) + wiring fixes | shipped | Tauri 2 + Svelte 5 desktop GUI, click-through works |
 | v0.2.1 | Design polish (no new phase) | shipped | Zinc visual direction across all seven screens |
-| v0.2.2 | **Phase 7.5 (S32 + S34) + HF1–HF3** | **planned** | macOS GUI declared stable: loop fixes the two bash/event-emission bugs, maintainer hand-fixes the three runtime-verification ones |
+| v0.2.2 | Phase 7.5 (S32 + S34) + HF1 + UX polish + dependabot | shipped | macOS GUI mostly stable for daily local use. Loop landed S32 + S34; HF1 done across four iterations; Stop/Start cycle, Stopped badge, Reset Enter-key, Ollama free-text/cloud links; cookie 0.7 override + 2 Rust alerts dismissed; 288/288 vitest. HF2 + HF3 deferred (don't block normal use). |
 | v0.3.0 | **Phase 8 (S37–S40)** Linux runtime parity | planned | Validate the existing GUI end-to-end on Ubuntu 22.04 / 24.04: WebKit2GTK quirks, host.docker.internal on Linux, file-permission edges. No new screens. |
 | v0.4.0 | **Phase 9 (S41–S47)** Signed distributables + bundled-mode data paths | planned | `appLocalDataDir` for bundled installs (replaces dev-only path), `f13-stop`/`f13-reset` discovery, signed `.dmg`, `.AppImage` + `.deb`, GitHub Releases automation, optional auto-update |
 
-Phase 8 only kicks off after v0.2.2 lands and the macOS GUI is
-considered the first *trustable* desktop release. Phase 9 is gated
-on both macOS and Linux runtimes being stable.
+Phase 8 starts immediately on the Linux machine; HF2 + HF3 land
+when convenient as a v0.2.3 patch (no schedule pressure since
+neither blocks normal use). Phase 9 is gated on both macOS and
+Linux runtimes being stable.
 
 ---
 
