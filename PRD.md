@@ -988,6 +988,67 @@ deferred past v0.2.2 to a later v0.2.x patch.
   compose errors. Cannot be automated without spinning real
   containers in CI.
 
+- [ ] **HF4: Reconfigure flow doesn't actually re-render with
+  the new selections.** Open. Two compounding bugs make the
+  GUI's "Reconfigure" path silently no-op when the user
+  changes the chat backend (mock ↔ Ollama) or any other
+  wizard input on a running stack:
+
+  1. **GUI side**: `runWizardNonInteractive` in
+     `gui/src/lib/engine.ts` accepts a `stateAction` option
+     but neither the Status screen's "Reconfigure" button
+     nor `gui/src/routes/wizard/run/+page.svelte` ever sets
+     it. With `.state` already on disk and no `F13_STATE_ACTION`
+     in env, `state::check` defaults to `keep` —
+     `bin/f13-config` then skips secrets / render / build /
+     pull entirely and only re-runs `compose::up` against the
+     unchanged compose file. The user's new backend choice is
+     never written to disk.
+
+  2. **Shell side**: even if the GUI passed
+     `stateAction: "edit"`, `state::read` in `lib/state.sh`
+     unconditionally clobbers env-set values (`PRESET`,
+     `CHAT_BACKEND`, `OLLAMA_MODEL`, `FRONTEND_PORT`,
+     `CORE_PORT`) with the saved state. So
+     `F13_CHAT_BACKEND=ollama` from the GUI survives only
+     until `state::read` overwrites it with the previously
+     saved `mock`. The CLI's interactive `edit` flow needs
+     state values as defaults, but the GUI needs the env to
+     win.
+
+  **Fix sketch:**
+  - Status "Reconfigure" → wizard run page passes
+    `stateAction: "edit"` to `runWizardNonInteractive`. (Or
+    derive it from "is the new selection different from the
+    saved state?" — but a static `edit` is the simpler call.)
+  - `state::read` only assigns from the state file when the
+    target var is unset/empty in the current env. Bats
+    coverage: pre-set `CHAT_BACKEND=ollama`, point at a
+    fixture state file with `CHAT_BACKEND=mock`, assert the
+    var stays `ollama`.
+
+  **Hand-verifiable:** start F13 with mock → click
+  Reconfigure → switch to Ollama → finish wizard. The chat
+  service in `docker compose ps` should now point at the
+  upstream chat image with `CHAT_BACKEND=ollama` env, and
+  `cat generated/.state` should show the new backend.
+  Reverse direction (Ollama → mock) likewise. Cannot be
+  fully automated since the GUI's reconfigure flow needs a
+  real running stack to exercise.
+
+  **Likely-others note.** The reconfigure path probably has
+  more edge cases that this single bug is masking: e.g. if
+  the user changes ports during reconfigure, does the
+  compose `restart: unless-stopped` semantic produce the
+  expected port swap? Does Ollama → mock leave a stale
+  `OLLAMA_MODEL` in `.state` that confuses the next edit?
+  Once HF4's two layers are fixed and the wizard actually
+  re-renders, sweep the reconfigure flow for adjacent
+  surprises before declaring it done. The maintainer's wish
+  here is "in-flight (or near-instant) model/backend swaps
+  for a running F13 stack" — HF4 is the unblocker for that
+  larger goal.
+
 ### Phase 8: Linux runtime parity (no new screens)
 
 Goal: validate the existing Phase 7 / 7.5 GUI end-to-end on Linux
