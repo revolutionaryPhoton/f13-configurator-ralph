@@ -9,6 +9,13 @@ configurator_v1/
 # Ralph loop runtime logs (per-iteration JSON, usage data)
 ralph-logs/
 
+# Local agent skills — contain personal paths, never commit
+.claude/
+
+# Standalone design-exploration repo, lives next to configurator/ for
+# convenience but unrelated to the ralph loop
+f13-configurator-design/
+
 # OS noise
 .DS_Store
 Thumbs.db
