@@ -106,37 +106,41 @@ Read /PRD.md for all rules. Key points:
 - S17–S31: desktop GUI (Phase 7, complete, shipped v0.2.0).
 - S32 + S34: Phase 7.5 polish (complete, shipped v0.2.2).
 - S37–S40: Phase 8 Linux runtime parity (complete, shipped v0.3.0).
+- S41–S44: Phase 9 GUI i18n + zoom (complete, shipped v0.4.0 — loop-driven).
 - HF1 / HF2 / HF3 / HF4: maintainer hand-fixes (v0.2.2 / v0.3.2 / v0.3.2 / v0.3.1).
 
-### Current loop target: Phase 9 — GUI i18n + zoom (target v0.4.0)
+### Current loop target: none
 
-Active stories: **S41, S42, S43, S44** — see PROGRESS.md "Pending
-Stories — Phase 9" section. S41 (i18n infra) lands first; the rest
-build on it.
+Phase 9 shipped as v0.4.0. PROGRESS.md has no Pending Stories table
+right now, so the loop should emit `<promise>COMPLETE</promise>` on
+first iteration per the stop rule below.
+
+When the maintainer queues a new phase, the PROGRESS.md Pending
+Stories table will be populated and the loop becomes active again.
+Until then, all open work in /PRD.md is intentionally out of scope:
+
+- HF5 in /PRD.md (auto-regenerate broken stack) — deferred to a
+  v0.4.x patch; needs maintainer UX judgement.
+- Phase 10 / S51–S57 in /PRD.md (signed distributables) — targeted
+  at v0.5.0. Needs signing certs / release secrets / packaging
+  tooling that the headless loop container doesn't have.
+
+### When the loop IS active again (for future Phase reference)
 
 Stack: Tauri 2.x + Svelte 5 + Vite + Tailwind 4 + TypeScript strict.
 Backpressure (HEADLESS):
     cd gui && npm run check && npm run test:unit && cargo check
-Phase 9 is GUI-only; no shell-wizard changes expected.
+Plus shellcheck + bats for any non-gui changes.
 
 Invoke /frontend-design-v2 skill before any .svelte UI file.
 Coverage on TS/Svelte: >= 75%.
 
-Feature branch: feat/phase9-i18n-zoom. Commit each story onto it;
-do NOT open per-story PRs. A single Phase 9 PR at the end.
+Multi-story phases land on a single feature branch (feat/phaseN-...)
+with ONE PR at the end. Do NOT open per-story PRs.
 
   🚫 NEVER run `npm run tauri dev`, `tauri dev`, `cargo run`,
   `npm run tauri build`, or any Tauri WebDriver E2E inside the loop.
   The loop is headless; those commands hang waiting for a window.
-
-### Out of scope for this loop — do NOT pick from these
-
-- HF5 in /PRD.md (auto-regenerate broken stack) — deferred to a
-  v0.4.x patch after Phase 9 ships; needs maintainer UX judgement.
-- Phase 10 / S51–S57 in /PRD.md (signed distributables) — targeted
-  at v0.5.0 after Phase 9 ships.
-- Any shell-wizard / bin/* / lib/*.sh / templates/* change unless a
-  Phase 9 story explicitly requires it.
 CLAUDEMD
   echo -e "${GREEN}Created $WORKDIR/CLAUDE.md${NC}"
 fi
