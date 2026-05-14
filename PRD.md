@@ -147,7 +147,7 @@ configurator_v1/
 
 ### Phase 0: Scaffolding
 
-- [ ] **S00: Project bootstrap**
+- [x] **S00: Project bootstrap** ✅ shipped in v0.1.0
   Create the directory layout above. Add `.gitignore` that excludes
   `generated/` and `*.secret`. Add a minimal README.md with one-line intent
   ("Shell configurator for a minimal F13 deployment"). Write initial
@@ -156,7 +156,7 @@ configurator_v1/
 
 ### Phase 1: UI Primitives
 
-- [ ] **S01: Colors, emoji, box-drawing helpers (`lib/ui.sh`)**
+- [x] **S01: Colors, emoji, box-drawing helpers (`lib/ui.sh`)** ✅ shipped in v0.1.0
   Implement:
   - `ui::red`, `ui::green`, `ui::yellow`, `ui::cyan`, `ui::dim`, `ui::bold`,
     `ui::reset` — stdout escape codes. Respect `NO_COLOR` env var.
@@ -167,13 +167,13 @@ configurator_v1/
   Bats tests: invoking each helper produces a non-empty line and the right
   substring (strip ANSI when asserting).
 
-- [ ] **S02: F13 ASCII banner (`lib/banner.sh`)**
+- [x] **S02: F13 ASCII banner (`lib/banner.sh`)** ✅ shipped in v0.1.0
   `ui::banner` prints a multi-line ASCII-art "F13" logo in cyan, centered,
   followed by `   F13 · minimal configurator · v1` in dim. Use block
   characters. Must render cleanly at 80-col terminals. Bats test: banner
   prints ≥ 5 lines and contains `F13`.
 
-- [ ] **S03: Interactive prompts (`lib/prompt.sh`)**
+- [x] **S03: Interactive prompts (`lib/prompt.sh`)** ✅ shipped in v0.1.0
   - `prompt::ask VAR "Question" [default]` — reads a line into `$VAR`,
     echoes default in gray.
   - `prompt::yesno "Question" [y|n]` — returns 0 for yes, 1 for no.
@@ -186,21 +186,21 @@ configurator_v1/
 
 ### Phase 2: System Integration
 
-- [ ] **S04: Random secrets (`lib/secrets.sh`)**
+- [x] **S04: Random secrets (`lib/secrets.sh`)** ✅ shipped in v0.1.0
   - `secret::gen [bytes]` — prints a base64url secret (default 32 bytes).
     Uses `openssl rand` if present, else `/dev/urandom` + `base64`.
   - `secret::write PATH` — generate and write with `chmod 600`.
   - Idempotent: if file exists, do not overwrite unless `--force`.
   Bats: generates unique values; file is 0600.
 
-- [ ] **S05: Port probes (`lib/ports.sh`)**
+- [x] **S05: Port probes (`lib/ports.sh`)** ✅ shipped in v0.1.0
   - `ports::is_free PORT` — returns 0 if `lsof -iTCP:PORT -sTCP:LISTEN`
     finds nothing (or `ss -ltn` fallback on Linux).
   - `ports::pick_free PREFERRED FALLBACK_RANGE…` — returns preferred if
     free, else next free port in the range.
   Bats: `ports::is_free 1` should be 1 (privileged/likely taken).
 
-- [ ] **S06: Preflight (`lib/preflight.sh`)**
+- [x] **S06: Preflight (`lib/preflight.sh`)** ✅ shipped in v0.1.0
   `preflight::run` checks in order and prints ✅ / ❌ per check:
   1. `docker` on PATH and `docker info` succeeds.
   2. `docker compose version` prints something.
@@ -210,7 +210,7 @@ configurator_v1/
   On any failure, print an install hint and exit 1. Bats test runs with
   PATH stubs.
 
-- [ ] **S07: Host Ollama integration (`lib/ollama.sh`)**
+- [x] **S07: Host Ollama integration (`lib/ollama.sh`)** ✅ shipped in v0.1.0
   - `ollama::is_running` — `curl -fsS http://localhost:11434/api/tags` in
     < 2s. Returns 0/1.
   - `ollama::list_models` — parses the tags JSON and prints model names,
@@ -223,13 +223,13 @@ configurator_v1/
 
 ### Phase 3: Templates and Rendering
 
-- [ ] **S08: Template renderer (`lib/render.sh`)**
+- [x] **S08: Template renderer (`lib/render.sh`)** ✅ shipped in v0.1.0
   - `render::file SRC DEST` — runs `envsubst` on SRC with an allow-list of
     vars (no shell metachars leak into YAML).
   - `render::tree templates/ generated/` — mirrors the template dir.
   Bats: render a fixture template and diff against expected output.
 
-- [ ] **S09: Compose + config templates**
+- [x] **S09: Compose + config templates** ✅ shipped in v0.1.0
   Populate `templates/` with the minimal stack. All vars `${LIKE_THIS}`
   are substituted.
 
@@ -273,7 +273,7 @@ configurator_v1/
 
 ### Phase 4: Wizard + Launch
 
-- [ ] **S10: Main wizard (`bin/f13-config`)**
+- [x] **S10: Main wizard (`bin/f13-config`)** ✅ shipped in v0.1.0
   The single entrypoint. Flow:
   1. `ui::banner`
   2. `preflight::run`
@@ -307,7 +307,7 @@ configurator_v1/
   Bats: invoke with `F13_CONFIG_NONINTERACTIVE=1` + full env, assert
   `generated/` is produced and contains the expected files.
 
-- [ ] **S11: Launch + health wait (`lib/compose.sh`)**
+- [x] **S11: Launch + health wait (`lib/compose.sh`)** ✅ shipped in v0.1.0
   - `compose::up` — runs `docker compose --env-file .env up -d` in
     `generated/`.
   - `compose::wait_healthy` — polls `core` health at `http://localhost:
@@ -322,7 +322,7 @@ configurator_v1/
     ```
   Bats: skip unless `docker info` works (mark `skip`).
 
-- [ ] **S12: Idempotency + re-run (`lib/state.sh`)**
+- [x] **S12: Idempotency + re-run (`lib/state.sh`)** ✅ shipped in v0.1.0
   - On start, if `generated/.state` exists, read it and print the current
     config, then prompt `[k]eep existing / [e]dit (re-run wizard with
     current values as defaults) / [r]eset (delete generated/ and start
@@ -334,13 +334,13 @@ configurator_v1/
 
 ### Phase 5: Polish
 
-- [ ] **S13: Shellcheck clean-up**
+- [x] **S13: Shellcheck clean-up** ✅ shipped in v0.1.0
   Run `shellcheck -S warning bin/* lib/*.sh` across the whole tree. Fix
   every warning. If a specific line truly needs an exception, add a
   narrow `# shellcheck disable=…` with a justification comment above.
   Commit.
 
-- [ ] **S14: README.md**
+- [x] **S14: README.md** ✅ shipped in v0.1.0
   User-facing docs at `configurator_v1/README.md`. Must cover:
   - What this is and what preset it installs.
   - One-paragraph quickstart: `cd configurator_v1 && ./bin/f13-config`.
@@ -354,14 +354,14 @@ configurator_v1/
   - A "what's generated" section showing the `generated/` tree.
   Commit.
 
-- [ ] **S15: Demo transcript**
+- [x] **S15: Demo transcript** ✅ shipped in v0.1.0
   Record a plain-text transcript of a full run (mock backend) and save
   as `docs/demo-transcript.txt`. Keep it tiny; just enough to show the
   UX. Commit.
 
 ### Phase 6: Frontend feature gating
 
-- [ ] **S16: Build a patched frontend image with feature gating**
+- [x] **S16: Build a patched frontend image with feature gating** ✅ shipped in v0.1.0
 
   **Problem:** The shipped frontend image always shows all features
   (chat, RAG, summary, transcription) when `KEYCLOAK_DISABLED=true`
@@ -604,7 +604,7 @@ not a re-implementation.
 
 **Story list (S17 — S31):**
 
-- [ ] **S17: Tauri scaffolding + dev workflow (macOS-validated)**
+- [x] **S17: Tauri scaffolding + dev workflow (macOS-validated)** ✅ shipped in v0.2.0
 
   Inside `configurator_v1/gui/`, scaffold a Tauri 2.x app:
   - `npm create tauri-app@latest` with template `svelte-ts`.
@@ -640,7 +640,7 @@ not a re-implementation.
     exercises the Linux compile path because that's where it runs.
   Commit.
 
-- [ ] **S18: Engine adapter (`gui/src/lib/engine.ts`)**
+- [x] **S18: Engine adapter (`gui/src/lib/engine.ts`)** ✅ shipped in v0.2.0
 
   Typed wrapper that shells out to the existing CLI:
   - `engine.preflight()` → streams ✅/❌/ⓘ events.
@@ -671,7 +671,7 @@ not a re-implementation.
   the adapter emits typed events to its consumers.
   Commit.
 
-- [ ] **S19: Design system import (`gui/src/lib/theme/`)**
+- [x] **S19: Design system import (`gui/src/lib/theme/`)** ✅ shipped in v0.2.0
 
   Invoke `/frontend-design-v2` skill before writing any UI.
   Bring over (or reproduce) from the F13 frontend:
@@ -688,7 +688,7 @@ not a re-implementation.
   smoke test on each.
   Commit.
 
-- [ ] **S20: Welcome screen + state-aware routing**
+- [x] **S20: Welcome screen + state-aware routing** ✅ shipped in v0.2.0
 
   Invoke `/frontend-design-v2` skill before writing any UI.
   Implement `gui/src/routes/+page.svelte`:
@@ -700,7 +700,7 @@ not a re-implementation.
   routing.
   Commit.
 
-- [ ] **S21: Preflight screen**
+- [x] **S21: Preflight screen** ✅ shipped in v0.2.0
 
   Invoke `/frontend-design-v2` skill.
   Implement `gui/src/routes/wizard/preflight/+page.svelte`:
@@ -715,7 +715,7 @@ not a re-implementation.
   Component test: feed scripted event streams, assert UI state at each.
   Commit.
 
-- [ ] **S22: Inference picker**
+- [x] **S22: Inference picker** ✅ shipped in v0.2.0
 
   Invoke `/frontend-design-v2` skill.
   Implement `gui/src/routes/wizard/inference/+page.svelte`:
@@ -729,7 +729,7 @@ not a re-implementation.
   are dispatched.
   Commit.
 
-- [ ] **S23: Ollama model picker**
+- [x] **S23: Ollama model picker** ✅ shipped in v0.2.0
 
   Invoke `/frontend-design-v2` skill.
   Implement `gui/src/routes/wizard/inference/ollama/+page.svelte`:
@@ -744,7 +744,7 @@ not a re-implementation.
   Mockup reference: section 3b.
   Commit.
 
-- [ ] **S24: Ports screen**
+- [x] **S24: Ports screen** ✅ shipped in v0.2.0
 
   Invoke `/frontend-design-v2` skill.
   Implement `gui/src/routes/wizard/ports/+page.svelte`:
@@ -757,7 +757,7 @@ not a re-implementation.
   Mockup reference: section 4.
   Commit.
 
-- [ ] **S25: Build / launch pipeline**
+- [x] **S25: Build / launch pipeline** ✅ shipped in v0.2.0
 
   Invoke `/frontend-design-v2` skill.
   Implement `gui/src/routes/wizard/run/+page.svelte`:
@@ -774,7 +774,7 @@ not a re-implementation.
   Mockup reference: section 5.
   Commit.
 
-- [ ] **S26: Status screen + actions**
+- [x] **S26: Status screen + actions** ✅ shipped in v0.2.0
 
   Invoke `/frontend-design-v2` skill.
   Implement `gui/src/routes/status/+page.svelte`:
@@ -786,7 +786,7 @@ not a re-implementation.
   Mockup reference: section 6.
   Commit.
 
-- [ ] **S27: Confirmations + edge cases**
+- [x] **S27: Confirmations + edge cases** ✅ shipped in v0.2.0
 
   Invoke `/frontend-design-v2` skill.
   - Reset confirmation modal (irreversible action — explicit "Type RESET
@@ -796,7 +796,7 @@ not a re-implementation.
     or "Stop & reconfigure" choice.
   Commit.
 
-- [ ] **S28: Settings panel**
+- [x] **S28: Settings panel** ✅ shipped in v0.2.0
 
   Invoke `/frontend-design-v2` skill.
   Implement `gui/src/routes/settings/+page.svelte`:
@@ -807,7 +807,7 @@ not a re-implementation.
   - Theme toggle (light / dark / system).
   Commit.
 
-- [ ] **S29: Packaging infrastructure (macOS only, no distributable artifacts)**
+- [x] **S29: Packaging infrastructure (macOS only, no distributable artifacts)** ✅ shipped in v0.2.0
 
   Goal: every piece needed to *eventually* produce a macOS installer is
   in place and validated by a local debug build, but **no `.dmg` is
@@ -851,7 +851,7 @@ not a re-implementation.
   - Auto-update flow.
   Commit.
 
-- [ ] **S30: GUI README + screenshots + CHANGELOG**
+- [x] **S30: GUI README + screenshots + CHANGELOG** ✅ shipped in v0.2.0
 
   - `gui/README.md`: stack, dev setup, packaging, troubleshooting.
   - Screenshots / animated GIFs of the wizard flow.
@@ -860,7 +860,7 @@ not a re-implementation.
   - CHANGELOG.md at repo root: notes for the GUI release.
   Commit.
 
-- [ ] **S31: End-to-end smoke test (maintainer-only, not loop-runnable)**
+- [x] **S31: End-to-end smoke test (maintainer-only, not loop-runnable)** ✅ shipped in v0.2.0
 
   - `gui/tests/e2e/smoke.spec.ts` using Tauri's WebDriver mode.
   - Click through Welcome → Preflight → Inference (mock) → Ports
