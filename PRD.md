@@ -1268,7 +1268,7 @@ maintainer review before merge.
   the en catalog first; missing keys in a translation catalog
   fall back to English at runtime.
 
-- [ ] **S41: i18n infrastructure + English baseline**
+- [x] **S41: i18n infrastructure + English baseline** ✅ shipped in v0.4.0 (squash commit `dc3d10f`, PR #4)
 
   Pick an i18n library compatible with Tauri 2 + SvelteKit
   static-adapter + Svelte 5 runes. Candidates: `svelte-i18n`,
@@ -1292,7 +1292,7 @@ maintainer review before merge.
   **Backpressure:** `npm run check && npm run test:unit &&
   cargo check` clean. Coverage on the new i18n module ≥ 75%.
 
-- [ ] **S42: Locale picker on welcome screen + persistence**
+- [x] **S42: Locale picker on welcome screen + persistence** ✅ shipped in v0.4.0
 
   Add a locale picker to the welcome screen. UI shape: small
   dropdown or four-button row (EN / DE / FR / ES) in a
@@ -1319,7 +1319,7 @@ maintainer review before merge.
   stored value survives reload (simulated), absent
   localStorage falls back to English.
 
-- [ ] **S43: German, French, Spanish translations**
+- [x] **S43: German, French, Spanish translations** ✅ shipped in v0.4.0
 
   Translate the entire English catalog from S41 into `de.json`,
   `fr.json`, `es.json`. This is the mechanical pass — the loop
@@ -1346,7 +1346,7 @@ maintainer review before merge.
   in vitest and asserting a known phrase renders in the
   expected language is enough.
 
-- [ ] **S44: Zoom — research, then implementation**
+- [x] **S44: Zoom — research, then implementation** ✅ shipped in v0.4.0 (CSS-zoom approach across all three Tauri webview backends)
 
   The GUI currently has no way for users to zoom in, and on
   high-DPI laptops the text can feel cramped. Implement zoom.
@@ -1498,16 +1498,17 @@ The PRD's story sequence maps onto the GitHub release line as follows:
 | v0.3.0 | **Phase 8 (S37–S40)** Linux runtime parity + image pinning + UX polish | shipped | GUI mostly stable on macOS + Linux (WSL2 Ubuntu 22.04 validated). Maintainer hand-fixes: secret-file mode 0644 for Linux bind-mounts (S39), `apply_linux_runtime_defaults()` silences libEGL/DMA-BUF warnings (S37), `host.docker.internal:host-gateway` confirmed under WSL2 + Docker Desktop (S38), `feedback_db.secret` round-trips through `edit` so postgres volume stays aligned, Tailwind v4 ProgressBar keyframe hoist, embedding-model alert in Ollama picker, soft warnings against embedding selections, image pins (core v2.0.0, chat v1.2.0, postgres 17, frontend git ref v2.0.0 → `f13-frontend:v2.0.0_based`), `frontend::get_source` always clones the pinned tag. HF4 (reconfigure no-op on backend swap) found and documented; doesn't block normal use. Ralph loop NOT used for any of this — interactive maintainer + Claude Code sessions on the actual Linux box. |
 | v0.3.1 | **HF4** — reconfigure flow re-renders on backend swap | shipped | Single ship covering three compounding bugs (env clobber in `state::read`, `F13_STATE_ACTION` shadowed before `state::check`, running stack not stopped before re-render) plus a GUI early-stop on the Reconfigure button so the wizard's port-check screen sees free ports. Validated on macOS via manual smoke (mock → Ollama → mock → fresh init); Linux validation deferred to next WSL2 session — pure logic/state-machine fix, no Linux-specific surface. PR #1 squashed as `f342a1f`. Ralph loop NOT used. |
 | v0.3.2 | **HF2 + HF3 + tauri 2.11.1** — Cancel kills wizard subprocess; missing-image precondition; Dependabot bump | shipped | HF2 plumbed `AbortSignal` end-to-end with a double-down mitigation for the orphaned `docker compose up` grandchild (proper kill-process-group fix deferred). HF3 pinned `pull_policy: never` on the frontend service and added a `docker image inspect` precondition in `compose::up` with the failure reason propagated through `COMPOSE_ERROR_MESSAGE` into the `done` event so the GUI's toast surfaces the friendly text. Tauri 2.10.3 → 2.11.1 via Dependabot #2 (Cargo.lock only). PR #3 squashed as `69f9bff`. Ralph loop NOT used. |
-| v0.4.0 | **Phase 9 (S41–S44)** GUI localization + zoom | planned | English / German / French / Spanish translations of every GUI string; locale picker on the welcome screen only (persisted to localStorage); zoom support via keyboard shortcuts and a small UI control (loop researches Tauri-2 zoom approach before implementing). Shell wizard terminal output stays English. Targeted ralph-loop phase — at least S41 (i18n infra) and S43 (translations) are mechanical fits; S44 (zoom) is research-first. Single Phase 9 PR rolls up all stories. |
+| v0.4.0 | **Phase 9 (S41–S44)** GUI localization + zoom | shipped | English / German / French / Spanish translations of every GUI string (176 keys × 4 locales, key parity enforced in CI); locale picker on the welcome screen only, persisted to `f13.configurator.locale`; zoom via `Ctrl/Cmd + +/−/0` shortcuts and a `−` / `100%` / `+` stepper in Settings → Appearance, factor persisted to `f13.configurator.zoom`. Shell wizard terminal output stays English. Ralph loop drove S41–S44; maintainer review added the LS key rename + Settings absence test + localization gaps in the Ollama prose / ports note / reset modal as follow-ups. PR #4 squashed as `dc3d10f`. |
 | v0.5.0 | **Phase 10 (S51–S57)** Signed distributables + bundled-mode data paths | planned | `appLocalDataDir` for bundled installs (replaces dev-only path), `f13-stop`/`f13-reset` discovery, signed `.dmg`, `.AppImage` + `.deb`, GitHub Releases automation, optional auto-update |
 
 Linux runtime parity (Phase 8) shipped in v0.3.0 via
 maintainer-side WSL2 testing. HF4 landed as v0.3.1; HF2 + HF3
-landed as v0.3.2 alongside the tauri 2.11.1 Dependabot bump.
-HF5 (auto-regenerate broken stack on Start, no wizard walk
-required) is the next loose end and is scoped for a v0.4.x
-patch after Phase 9 (i18n + zoom, v0.4.0) ships. Phase 9 is
-the next loop-driven phase; Phase 10 (signed distributables,
+landed as v0.3.2 alongside the tauri 2.11.1 Dependabot bump;
+Phase 9 (i18n + zoom) shipped as v0.4.0 — the first phase the
+ralph loop drove end-to-end since Phase 7.5. HF5 (auto-regenerate
+broken stack on Start, no wizard walk required) is the next loose
+end and is scoped for a v0.4.x patch when maintainer judgement on
+the UX shape is available. Phase 10 (signed distributables,
 was Phase 9, retargeted v0.5.0)
 is no longer gated on Linux runtime stability (that gate
 cleared in v0.3.0); it's gated on the maintainer wanting to
