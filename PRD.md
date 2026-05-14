@@ -963,30 +963,29 @@ deferred past v0.2.2 to a later v0.2.x patch.
   `configurator_v1/generated/` and `./bin/f13-stop` from a terminal
   Just Works without env overrides.
 
-- [ ] **HF2: Cancel button actually aborts the subprocess.** Open.
-  Currently `handleCancel()` only flips a JS-side `cancelToken`;
-  the bash process keeps running and can finish a half-built docker
-  stack. Fix: `tauriRunner.ts` returns a kill handle from
-  `runner.run()`; the engine propagates it through
-  `runWizardNonInteractive` and `compose.up`; the run page calls
-  `kill()` then `compose.down()`. **Hand-verifiable:** Cancel
-  mid-pipeline drops the bash process within 2s (visible via
-  `ps -ef | grep f13-config`) and leaves no orphan containers
-  (`docker ps`).
+- [x] **HF2: Cancel button actually aborts the subprocess.**
+  ✅ shipped in v0.3.2 (squash commit `69f9bff`, PR #3).
+  Plumbed `AbortSignal` through `ProcessRunner.run` →
+  `engine.runWizardNonInteractive` → `tauriRunner.child.kill()`.
+  Run page's `handleCancel()` calls `controller.abort()` then
+  tears down twice with a 1.5 s gap to catch the orphaned
+  `docker compose up` grandchild (which is reparented to PID 1
+  when bash dies and keeps running). The proper kernel-level
+  fix (kill the process group via `setsid`/`process_group(0)`
+  on the Rust side) is deferred — current double-down
+  mitigation solves the user-visible bug.
 
-- [ ] **HF3: Eliminate sporadic "pull access denied" on
-  `f13-frontend`.** Open. Compose occasionally tries to pull the
-  locally built `f13-frontend:configurator-v1` image instead of
-  using the local one. Not seen since HF1 v4 landed but the
-  precondition guard isn't in place yet. Fix candidates: add
-  `pull_policy: never` to the frontend service in the compose
-  template; add a `docker image inspect` precondition before
-  `compose::up` that surfaces a clear "frontend image missing"
-  error instead of letting compose blunder into a failed pull.
-  **Hand-verifiable:** ten consecutive fresh cycles
-  (reset → setup → status → reset) produce zero pull-related
-  compose errors. Cannot be automated without spinning real
-  containers in CI.
+- [x] **HF3: Eliminate sporadic "pull access denied" on
+  `f13-frontend`.** ✅ shipped in v0.3.2 (squash commit `69f9bff`,
+  PR #3). Two layers: pinned `pull_policy: never` on the frontend
+  service in the compose template, and added a
+  `compose::_docker_image_inspect` precondition in `compose::up`
+  that returns a clear "frontend image is missing locally — re-run
+  the wizard so it can rebuild" message via `COMPOSE_ERROR_MESSAGE`.
+  The `--compose-up` handler propagates that into the `done` event
+  so the GUI's error toast surfaces the friendly text. UX recovery
+  gap (still requires walking the full Reconfigure wizard) tracked
+  separately as HF5.
 
 - [x] **HF4: Reconfigure flow doesn't actually re-render with
   the new selections.** ✅ shipped in v0.3.1 (squash commit
@@ -1326,12 +1325,15 @@ The PRD's story sequence maps onto the GitHub release line as follows:
 | v0.2.2 | Phase 7.5 (S32 + S34) + HF1 + UX polish + dependabot | shipped | macOS GUI mostly stable for daily local use. Loop landed S32 + S34; HF1 done across four iterations; Stop/Start cycle, Stopped badge, Reset Enter-key, Ollama free-text/cloud links; cookie 0.7 override + 2 Rust alerts dismissed; 288/288 vitest. HF2 + HF3 deferred (don't block normal use). |
 | v0.3.0 | **Phase 8 (S37–S40)** Linux runtime parity + image pinning + UX polish | shipped | GUI mostly stable on macOS + Linux (WSL2 Ubuntu 22.04 validated). Maintainer hand-fixes: secret-file mode 0644 for Linux bind-mounts (S39), `apply_linux_runtime_defaults()` silences libEGL/DMA-BUF warnings (S37), `host.docker.internal:host-gateway` confirmed under WSL2 + Docker Desktop (S38), `feedback_db.secret` round-trips through `edit` so postgres volume stays aligned, Tailwind v4 ProgressBar keyframe hoist, embedding-model alert in Ollama picker, soft warnings against embedding selections, image pins (core v2.0.0, chat v1.2.0, postgres 17, frontend git ref v2.0.0 → `f13-frontend:v2.0.0_based`), `frontend::get_source` always clones the pinned tag. HF4 (reconfigure no-op on backend swap) found and documented; doesn't block normal use. Ralph loop NOT used for any of this — interactive maintainer + Claude Code sessions on the actual Linux box. |
 | v0.3.1 | **HF4** — reconfigure flow re-renders on backend swap | shipped | Single ship covering three compounding bugs (env clobber in `state::read`, `F13_STATE_ACTION` shadowed before `state::check`, running stack not stopped before re-render) plus a GUI early-stop on the Reconfigure button so the wizard's port-check screen sees free ports. Validated on macOS via manual smoke (mock → Ollama → mock → fresh init); Linux validation deferred to next WSL2 session — pure logic/state-machine fix, no Linux-specific surface. PR #1 squashed as `f342a1f`. Ralph loop NOT used. |
+| v0.3.2 | **HF2 + HF3 + tauri 2.11.1** — Cancel kills wizard subprocess; missing-image precondition; Dependabot bump | shipped | HF2 plumbed `AbortSignal` end-to-end with a double-down mitigation for the orphaned `docker compose up` grandchild (proper kill-process-group fix deferred). HF3 pinned `pull_policy: never` on the frontend service and added a `docker image inspect` precondition in `compose::up` with the failure reason propagated through `COMPOSE_ERROR_MESSAGE` into the `done` event so the GUI's toast surfaces the friendly text. Tauri 2.10.3 → 2.11.1 via Dependabot #2 (Cargo.lock only). PR #3 squashed as `69f9bff`. Ralph loop NOT used. |
 | v0.4.0 | **Phase 9 (S41–S47)** Signed distributables + bundled-mode data paths | planned | `appLocalDataDir` for bundled installs (replaces dev-only path), `f13-stop`/`f13-reset` discovery, signed `.dmg`, `.AppImage` + `.deb`, GitHub Releases automation, optional auto-update |
 
 Linux runtime parity (Phase 8) shipped in v0.3.0 via
-maintainer-side WSL2 testing. HF4 landed as v0.3.1; HF2 and
-HF3 remain open and land when convenient as further v0.3.x
-patches — neither blocks normal use. Phase 9
+maintainer-side WSL2 testing. HF4 landed as v0.3.1; HF2 + HF3
+landed as v0.3.2 alongside the tauri 2.11.1 Dependabot bump.
+HF5 (auto-regenerate broken stack on Start, no wizard walk
+required) is the next loose end and is scoped for a future
+v0.3.x patch. Phase 9
 is no longer gated on Linux runtime stability (that gate
 cleared in v0.3.0); it's gated on the maintainer wanting to
 ship signed installer artifacts.
