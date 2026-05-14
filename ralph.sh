@@ -109,21 +109,28 @@ Read /PRD.md for all rules. Key points:
 - S41–S44: Phase 9 GUI i18n + zoom (complete, shipped v0.4.0 — loop-driven).
 - HF1 / HF2 / HF3 / HF4: maintainer hand-fixes (v0.2.2 / v0.3.2 / v0.3.2 / v0.3.1).
 
-### Current loop target: none
+### Current loop target: Phase 10 loop-runnable subset → v0.5.0
 
-Phase 9 shipped as v0.4.0. PROGRESS.md has no Pending Stories table
-right now, so the loop should emit `<promise>COMPLETE</promise>` on
-first iteration per the stop rule below.
+Active stories: **S51 + S52** — see PROGRESS.md "Pending Stories
+— Phase 10". S51 lands first (Rust path resolution for bundled
+installs); S52 builds on it (shell-script discovery).
 
-When the maintainer queues a new phase, the PROGRESS.md Pending
-Stories table will be populated and the loop becomes active again.
-Until then, all open work in /PRD.md is intentionally out of scope:
+Stories S53–S56 ship in the same Phase 10 PR but are maintainer-
+driven (Apple cert + GitHub release secrets). Do NOT attempt them.
+Drafting release.yml YAML skeleton is OK; wiring secrets is not.
 
-- HF5 in /PRD.md (auto-regenerate broken stack) — deferred to a
-  v0.4.x patch; needs maintainer UX judgement.
-- Phase 10 / S51–S57 in /PRD.md (signed distributables) — targeted
-  at v0.5.0. Needs signing certs / release secrets / packaging
-  tooling that the headless loop container doesn't have.
+Feature branch: feat/phase10-distributables. Single Phase 10 PR
+rolls everything up at the end.
+
+### Out of scope for this loop — do NOT pick from these
+
+- S53/S54/S55/S56 (signing / .dmg / .AppImage+.deb / release CI
+  secrets) — see above.
+- HF5 in /PRD.md → promoted to S61 in Phase 11. Don't pick up
+  until Phase 10 ships.
+- Phase 11 / S61, S62 — targeted v0.6.0.
+- Phase 12 / S71–S73 (Homebrew) — targeted v0.7.0.
+- Phases 13–16 / S81–S115 — long-horizon, not active.
 
 ### When the loop IS active again (for future Phase reference)
 
