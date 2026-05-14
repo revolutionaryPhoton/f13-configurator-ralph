@@ -1590,6 +1590,356 @@ formula referencing the GitHub Release `.dmg`, and documentation.
 > covers ~90% of the realistic install paths for this kind of
 > developer tool.
 
+### Phase 13: Full preset — RAG + summary + parser
+
+Today the configurator ships exactly one preset: `core + frontend +
+chat`. That's the easiest possible slice of F13 — useful for trying
+the platform but nowhere near what real users want. Phase 13 adds a
+**`full`** preset that brings up the rest of F13's microservice
+catalog as a single opinionated bundle. **Target release: v0.8.0.**
+
+No per-service customization in this phase — that's Phase 14. Phase
+13 deliberately keeps the UX simple ("basic" vs "full" radio) while
+the templates, health-wait logic, dependency graph, and resource
+estimation are all proven against a working stack.
+
+**Out of scope for this phase:**
+- Transcription (Whisper / similar) — defer to a future "specialty
+  services" phase when there's user demand.
+- Per-service toggles — Phase 14.
+- Custom system prompts / chat parameters — Phase 15.
+- Frontend branding overrides — Phase 16.
+
+**Branch + PR workflow:** single feature branch
+`feat/phase13-full-preset`, single Phase 13 PR.
+
+- [ ] **S81: F13 microservice catalog research**
+
+  Document upstream F13 RAG / summary / parser services in
+  enough detail to template them: image pins (current versions),
+  env-var contracts, exposed ports, health endpoints, inter-
+  service dependencies (e.g. RAG → embedding model, RAG → parser
+  for document ingestion).
+
+  Output: a new `docs/services-catalog.md` in the configurator
+  repo (or a section in the README). Each service gets a row
+  with image, port(s), env vars, depends-on, RAM estimate.
+
+  **Maintainer-driven** for the upstream coordination + image-
+  pin decisions. The loop can draft the markdown skeleton from
+  public F13 sources but the maintainer signs off on what's
+  current and supported.
+
+- [ ] **S82: RAG service + embedding-model handling**
+
+  Add the RAG service to `templates/docker-compose.yml.tmpl`
+  under a `full` Compose profile. Wire its env vars from `.env`
+  (`RAG_*` namespace). Add a health-wait step in `lib/compose.sh`.
+
+  Ollama picker grows a second model selection — **embedding
+  model** (default `nomic-embed-text`) — that only shows when
+  RAG is in the selected preset. Phase 9 already added the
+  embedding-model *warning* on the chat picker; this phase adds
+  an embedding-model *picker* for the RAG path. Free-text input
+  supported (same UX as the chat-model picker), since users may
+  prefer specific embedding models.
+
+  ENABLED_FEATURES env var grows from `chat` to `chat,rag` when
+  RAG is in the preset.
+
+  **Loop-runnable** for the template + plumbing; maintainer
+  validates against a real RAG-ready Ollama install.
+
+- [ ] **S83: Summary service**
+
+  Add the summary service to the `full` Compose profile. Wire
+  its env vars. Health-wait. ENABLED_FEATURES grows to include
+  `summary`. If summary depends on chat (likely shares the
+  chat-model client), document and enforce that dependency.
+
+  **Loop-runnable.** Smaller than S82 since no new model picker.
+
+- [ ] **S84: Parser service**
+
+  Add the parser service to the `full` Compose profile. Wire
+  env vars. Health-wait. ENABLED_FEATURES grows to include
+  `parser`. Parser is upstream of RAG (feeds it documents);
+  the wizard should only enable parser when RAG is also in
+  the selection (or warn that parser is mostly useless without
+  RAG).
+
+  **Loop-runnable.**
+
+- [ ] **S85: Preflight resource estimation**
+
+  Today `preflight::run` checks ~2 GB free disk. The full
+  preset can easily need 15–30 GB RAM and 10+ GB disk
+  depending on the chat-model + embedding-model sizes. Extend
+  preflight with:
+  - Per-service RAM estimate (sum across selected services
+    using the catalog data from S81).
+  - Per-model RAM estimate based on the chat-model size
+    (cloud-tagged = 0 local, locally-pulled = derive from
+    `ollama list` or a known-models table).
+  - Compare against `sysctl hw.memsize` (macOS) / `/proc/meminfo`
+    (Linux). Warn (not block) if estimate > available.
+  - Disk estimate vs `df` output.
+
+  Bats tests for the math; manual verification for the
+  platform-specific RAM probes.
+
+  **Loop-runnable.**
+
+- [ ] **S86: Preset picker (shell + GUI)**
+
+  - Shell wizard: a new step (between the inference picker and
+    the Ollama-model picker) — "Which F13 services?" — with two
+    radio options: `basic` (core+frontend+chat, today's
+    default) and `full` (everything from S82–S84).
+  - GUI: a new screen between `/wizard/inference` and
+    `/wizard/inference/ollama` showing the two presets as
+    Tile components (like the inference picker), with bullet
+    points listing what each preset includes and the rough
+    resource estimate from S85.
+  - State: `.state` grows a `PRESET` key (already there
+    nominally — currently always `core+frontend+chat`) with
+    legal values `basic` / `full`.
+  - i18n: add catalog entries for `preset.*` keys in all four
+    locales (Phase 9 i18n infrastructure handles it).
+
+  Updates the breadcrumb from "Step N of 4" to "Step N of 5"
+  in the relevant screens.
+
+  **Loop-runnable.**
+
+### Phase 14: User-adjustable microservice set
+
+Phase 13 ships an opinionated bundle. Phase 14 replaces the
+`basic`/`full` radio with a **checkbox grid** so users can mix and
+match. **Target release: v0.9.0.**
+
+This is purely a UX layer on top of Phase 13's templates and
+preflight machinery — no new service work, no new image pins.
+Smaller phase, ~4 stories.
+
+**Branch + PR workflow:** single feature branch
+`feat/phase14-adjustable-services`, single Phase 14 PR.
+
+- [ ] **S91: Multi-select picker (shell + GUI)**
+
+  Replace the basic/full radio from S86 with a checkbox grid:
+  one row per service (chat, RAG, summary, parser), each with
+  a description, RAM estimate, and dependency arrows ("RAG
+  needs embeddings"). Chat is always required (greyed out,
+  pre-checked).
+
+  `.state.PRESET` becomes a comma-separated list (e.g.
+  `chat,rag` or `chat,rag,summary,parser`).
+
+  **Loop-runnable.**
+
+- [ ] **S92: Live resource estimation**
+
+  As the user toggles checkboxes, the "estimated RAM / disk"
+  number updates in real time (no full preflight re-run, just
+  recompute the math from S85). Visual cue when the estimate
+  exceeds available host resources.
+
+  **Loop-runnable.**
+
+- [ ] **S93: Dependency enforcement**
+
+  - If user enables RAG, auto-tick "embedding model required"
+    on the Ollama path (or surface a warning on the mock path
+    since RAG with mock doesn't make sense).
+  - If user enables parser without RAG, show a soft warning.
+  - If user disables chat (which shouldn't be possible per S91,
+    but defensive), block continue.
+
+  Bats + vitest cover the dependency graph evaluator.
+
+  **Loop-runnable.**
+
+- [ ] **S94: COMPOSE_PROFILES + ENABLED_FEATURES generation**
+
+  The compose template grows multiple profiles (`chat`,
+  `rag`, `summary`, `parser` — each guarding its service
+  block). `COMPOSE_PROFILES` in `.env` becomes the
+  comma-separated activation list; `ENABLED_FEATURES` (the
+  frontend gating var) becomes the parallel list. Both are
+  derived from `.state.PRESET`.
+
+  Render tests verify the right services are in the rendered
+  `docker-compose.yml` for each preset combination. Integration
+  tests would need real containers — out of scope for the loop,
+  maintainer smoke-tests representative combos (chat-only,
+  chat+rag, full set, parser-without-rag-warned).
+
+  **Loop-runnable.**
+
+### Phase 15: Chat parameter tuning
+
+User-facing tuning of the chat experience: system prompt, model
+temperature, maximum input tokens, maximum output tokens. **Target
+release: v0.10.0.**
+
+No new services, no upstream coordination — just exposing
+configuration that the chat service already supports. Smallest
+post-distribution phase.
+
+**Branch + PR workflow:** single feature branch
+`feat/phase15-chat-params`, single Phase 15 PR.
+
+- [ ] **S101: Chat config template extension**
+
+  Extend `templates/chat/llm_models.yml.tmpl` with the
+  parameters the upstream chat service actually accepts:
+  `system_prompt`, `temperature`, `max_input_tokens`,
+  `max_output_tokens` (subject to S81's research catalog —
+  the actual list comes from F13's chat service docs).
+
+  Defaults sensible enough that users who never visit the
+  settings panel get the same behaviour as today. `.state`
+  grows matching keys.
+
+  **Loop-runnable.**
+
+- [ ] **S102: Settings panel UI (shell + GUI)**
+
+  - GUI: a new "Chat" section in Settings (`/settings`)
+    alongside the existing "Appearance" and "Generated config"
+    sections. Form fields for each parameter, save-on-change
+    (no separate save button — auto-persist to `.state` and
+    write through to the rendered chat config). Trigger a
+    chat-service restart on save (via the existing
+    `compose.up` / `compose.restart` path).
+  - Shell wizard: a new "Chat parameters" step (optional —
+    skippable with defaults) between the model picker and
+    the ports screen. Or a `--edit-chat-params` CLI flag for
+    standalone access without re-running the full wizard.
+  - i18n: catalog entries for `settings.chat.*`.
+
+  **Loop-runnable.**
+
+- [ ] **S103: Persistence + reload + smoke**
+
+  `.state` survives wizard re-runs (existing HF4 plumbing
+  handles this). Verify by switching values, restarting F13,
+  and checking the chat service picks them up. Add a vitest
+  for the GUI form + bats for the shell flow.
+
+  **Loop-runnable** for the wiring; maintainer smoke-tests
+  against a real chat service.
+
+### Phase 16: Branding / text customization
+
+The biggest customization story — let organizations rebrand F13 for
+their own use. Logo, color palette, and arbitrary text-string
+overrides. **Target release: v0.11.0.**
+
+**Architecture constraint:** F13 frontend does NOT support runtime
+overrides (no env-var or volume-mount mechanism, and no upstream
+appetite for adding one as of 2026-05). The only viable path is
+**extending the existing S16 patched-build pattern** — generate
+overrides into the patched frontend image at build time, same as
+`UIStore.js` and the `docker-entrypoint.sh` patches already do.
+
+That means:
+- Every branding change triggers a frontend rebuild (~1–3 min).
+- Patches are tightly coupled to F13 frontend internals; pinning to
+  a specific frontend version (already in place since v0.3.0) becomes
+  even more important.
+- A new frontend release may break the patches; bump-and-test cycle
+  needed when `_FRONTEND_GIT_REF` changes.
+
+**Branch + PR workflow:** single feature branch
+`feat/phase16-branding`, single Phase 16 PR.
+
+- [ ] **S111: Patchable-surface inventory**
+
+  Survey the F13 frontend (at the currently pinned `_FRONTEND_GIT_REF`
+  tag) for:
+  - Hardcoded logo references (file paths + sizes)
+  - Color tokens (CSS variables, Tailwind config, inline styles)
+  - Hardcoded German strings (i18n catalog files? hardcoded JSX?)
+  - Favicon
+  - Page title / metadata
+
+  Output: `docs/branding-surfaces.md` listing each surface, its
+  location in the frontend source, and the patch approach.
+
+  **Maintainer-driven research** — needs eyes on the upstream
+  frontend source.
+
+- [ ] **S112: Logo + favicon override**
+
+  - Configurator accepts user-supplied image files (logo .svg or
+    .png, favicon .ico or .png).
+  - `frontend::patch_and_build` extends to copy these into the
+    appropriate frontend assets directory before `docker build`.
+  - Wizard step / Settings panel UI for upload.
+  - `.state` stores paths (or copies into `generated/branding/`).
+
+  **Loop-runnable** for the wiring; maintainer validates the
+  rebuild produces a working image.
+
+- [ ] **S113: Color palette override**
+
+  - Accept user colors (primary, secondary, accent, etc. — the
+    exact palette comes from S111's inventory).
+  - Patch the frontend's CSS variables (or Tailwind theme config)
+    at build time.
+  - Wizard step / Settings panel with color pickers and a live
+    preview component.
+
+  **Loop-runnable** for the patch logic; tricky for the live
+  preview if it requires running the patched frontend in a
+  preview iframe — may need a separate preview-only build target.
+
+- [ ] **S114: Text string override**
+
+  - Accept a key:value JSON (`{"app.title": "Bürgerassistent",
+    ...}`) from the user.
+  - Patch the frontend's i18n catalog files at build time
+    (extending the S16 awk-script pattern). Default to whatever
+    locale F13 ships; offer multi-locale overrides if the
+    frontend catalogs are split.
+  - Wizard step / Settings panel: structured editor (one row
+    per key with default value + override field), not a raw
+    JSON blob.
+
+  Tightest coupling to upstream of any story in this phase. If
+  F13's frontend i18n structure changes, this breaks.
+
+  **Loop-runnable** for the wiring; maintainer validates each
+  upstream frontend bump.
+
+- [ ] **S115: Branding panel (GUI)**
+
+  A dedicated `/settings/branding` route in the GUI that bundles
+  S112 + S113 + S114 into one workflow:
+  - Upload logo + favicon
+  - Pick color palette
+  - Edit text strings
+  - "Apply branding" button → triggers full frontend rebuild
+    (re-uses the existing `secrets → render → build → pull →
+    start` pipeline from the wizard run page, but only the
+    `build → pull → start` half).
+
+  Live preview if S113 makes it cheap; otherwise a "this will
+  take 1–3 minutes" confirmation modal.
+
+  **Loop-runnable.**
+
+> **Risk note for Phase 16:** every upstream F13 frontend release
+> needs a patch-compatibility check. Recommend documenting a
+> dedicated "branding regression test" the maintainer runs whenever
+> `_FRONTEND_GIT_REF` is bumped: build with a known reference
+> branding override, smoke-test that the patches still apply
+> cleanly, that the rebuilt image shows the expected branding.
+> Without that gate, a v0.4.0 frontend bump could silently break
+> v0.11.0 branding for all users.
+
 ---
 
 ## Release roadmap
@@ -1609,6 +1959,10 @@ The PRD's story sequence maps onto the GitHub release line as follows:
 | v0.5.0 | **Phase 10 (S51–S56)** Signed distributables + bundled-mode data paths | planned | `appLocalDataDir` for bundled installs (replaces dev-only path), `f13-stop`/`f13-reset` discovery, signed `.dmg` (macOS arm64 only), `.AppImage` + `.deb` (Linux x86_64 only), GitHub Releases automation with draft + manual publish. Feature branch `feat/phase10-distributables`, single PR. S51 + S52 loop-runnable; S53–S56 maintainer-driven (Apple cert, GitHub release secrets). |
 | v0.6.0 | **Phase 11 (S61 + S62)** UX polish + auto-update | planned | S61: auto-regenerate broken stack on Start instead of forcing user through Reconfigure wizard (former HF5, promoted to a real story since it's pure GUI plumbing). S62: optional Tauri auto-update with separate updater keypair and signed manifest in the GitHub Release (former S57). Feature branch `feat/phase11-polish-autoupdate`, single PR. |
 | v0.7.0 | **Phase 12 (S71–S73)** Homebrew distribution | planned | macOS users can `brew install --cask f13-configurator` from a maintainer-owned tap (`revolutionaryPhoton/homebrew-f13`). GitHub Releases remain the canonical artifact source. S73 (release-workflow integration to auto-bump the cask formula) is optional. Feature branch `feat/phase12-homebrew`, single PR. |
+| v0.8.0 | **Phase 13 (S81–S86)** Full preset — RAG + summary + parser | planned | New `full` preset alongside today's `basic`. RAG, summary, parser services templated and gated by Compose profiles + `ENABLED_FEATURES`. Ollama picker grows an embedding-model selection when RAG is in the preset. Preflight learns to estimate per-service RAM/disk against host resources. Single preset radio (basic / full), no per-service toggles yet. Transcription explicitly deferred. Feature branch `feat/phase13-full-preset`, single PR. Mostly loop-runnable; S81 (upstream catalog research) is maintainer-driven. |
+| v0.9.0 | **Phase 14 (S91–S94)** User-adjustable microservice set | planned | Replace the basic/full radio with a checkbox grid — users mix and match services. Live resource estimation as toggles flip. Dependency enforcement (RAG → embeddings, parser → RAG warned, chat always required). `COMPOSE_PROFILES` + `ENABLED_FEATURES` derived from the selection. Pure UX layer on Phase 13's templates. Feature branch `feat/phase14-adjustable-services`, single PR. Fully loop-runnable. |
+| v0.10.0 | **Phase 15 (S101–S103)** Chat parameter tuning | planned | System prompt, temperature, max input/output tokens exposed in Settings → Chat (GUI) and an optional `--edit-chat-params` flow (shell). Persists to `.state`; chat service restarts on save. No new services, no upstream coordination. Smallest post-distribution phase. Feature branch `feat/phase15-chat-params`, single PR. Fully loop-runnable. |
+| v0.11.0 | **Phase 16 (S111–S115)** Branding / text customization | planned | Logo + favicon upload, color palette picker, text-string overrides — all wired through the existing S16 patched-frontend-build mechanism (no upstream F13 cooperation available, per 2026-05 maintainer decision). Every branding change triggers a ~1–3 min frontend rebuild. Tightly coupled to the pinned `_FRONTEND_GIT_REF`; each upstream frontend bump needs a branding-regression smoke-test. Feature branch `feat/phase16-branding`, single PR. Loop-runnable for wiring; S111 (surface inventory) maintainer-driven. |
 
 Linux runtime parity (Phase 8) shipped in v0.3.0 via
 maintainer-side WSL2 testing. HF4 landed as v0.3.1; HF2 + HF3
@@ -1623,6 +1977,21 @@ and GitHub repo secrets being in place. Phase 11 (v0.6.0) bundles
 the auto-update story (former S57) with HF5/S61 once Phase 10 has
 shipped. Phase 12 (v0.7.0) adds Homebrew cask distribution as a
 convenience layer on top of the canonical GitHub Releases.
+
+Phases 13–16 are the **feature-completeness arc** — taking the
+configurator from "the simplest possible F13" to "every F13
+microservice, mixed and matched, with chat tuning and full
+branding overrides." Phase 13 ships the `full` preset (RAG +
+summary + parser) as an opinionated bundle (v0.8.0). Phase 14
+replaces the basic/full radio with a per-service checkbox grid
+(v0.9.0). Phase 15 adds chat parameter tuning — system prompt,
+temperature, token limits (v0.10.0). Phase 16 lets organizations
+rebrand F13 by patching the upstream frontend image with custom
+logo, colors, and text strings at build time — the only viable
+path since F13's frontend doesn't support runtime overrides
+(v0.11.0). Transcription is explicitly out of scope across all
+these phases; if there's demand, a future Phase 17 "specialty
+services" bucket would pick it up.
 
 ---
 
