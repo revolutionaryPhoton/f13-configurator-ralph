@@ -1618,8 +1618,15 @@ estimation are all proven against a working stack.
   Document upstream F13 RAG / summary / parser services in
   enough detail to template them: image pins (current versions),
   env-var contracts, exposed ports, health endpoints, inter-
-  service dependencies (e.g. RAG → embedding model, RAG → parser
-  for document ingestion).
+  service dependencies. Known dependencies as of 2026-05:
+  - **RAG → embedding model** (Ollama path) — RAG cannot run
+    without an embedding model available to its retrieval
+    layer. Independent of parser.
+  - **Summary → parser** — summary doesn't work without parser
+    upstream of it; parser is mandatory whenever summary is
+    enabled. Independent of RAG.
+  - **Parser alone is valid** — has its own API even if
+    summary is the main consumer.
 
   Output: a new `docs/services-catalog.md` in the configurator
   repo (or a section in the README). Each service gets a row
@@ -1654,19 +1661,23 @@ estimation are all proven against a working stack.
 
   Add the summary service to the `full` Compose profile. Wire
   its env vars. Health-wait. ENABLED_FEATURES grows to include
-  `summary`. If summary depends on chat (likely shares the
-  chat-model client), document and enforce that dependency.
+  `summary`. **Summary requires parser** — enable parser
+  whenever summary is in the selection. In Phase 13's
+  basic/full radio this is automatic (both are in `full`);
+  Phase 14's checkbox UI will need explicit dependency
+  enforcement.
 
-  **Loop-runnable.** Smaller than S82 since no new model picker.
+  **Loop-runnable.** No new model picker.
 
 - [ ] **S84: Parser service**
 
   Add the parser service to the `full` Compose profile. Wire
   env vars. Health-wait. ENABLED_FEATURES grows to include
-  `parser`. Parser is upstream of RAG (feeds it documents);
-  the wizard should only enable parser when RAG is also in
-  the selection (or warn that parser is mostly useless without
-  RAG).
+  `parser`. Parser is upstream of summary (provides the document
+  extraction that summary consumes) but has its own API and is
+  valid as a standalone service — no warning needed if parser is
+  enabled without summary. The reverse (summary without parser)
+  is a hard dependency enforced in S83/S93.
 
   **Loop-runnable.**
 
@@ -1752,7 +1763,11 @@ Smaller phase, ~4 stories.
   - If user enables RAG, auto-tick "embedding model required"
     on the Ollama path (or surface a warning on the mock path
     since RAG with mock doesn't make sense).
-  - If user enables parser without RAG, show a soft warning.
+  - If user enables summary, auto-tick parser (hard dependency)
+    and surface an info note explaining why. Block continue if
+    summary is selected but parser is somehow unticked.
+  - Parser without summary is fine — no warning. Parser has its
+    own API.
   - If user disables chat (which shouldn't be possible per S91,
     but defensive), block continue.
 
@@ -1960,7 +1975,7 @@ The PRD's story sequence maps onto the GitHub release line as follows:
 | v0.6.0 | **Phase 11 (S61 + S62)** UX polish + auto-update | planned | S61: auto-regenerate broken stack on Start instead of forcing user through Reconfigure wizard (former HF5, promoted to a real story since it's pure GUI plumbing). S62: optional Tauri auto-update with separate updater keypair and signed manifest in the GitHub Release (former S57). Feature branch `feat/phase11-polish-autoupdate`, single PR. |
 | v0.7.0 | **Phase 12 (S71–S73)** Homebrew distribution | planned | macOS users can `brew install --cask f13-configurator` from a maintainer-owned tap (`revolutionaryPhoton/homebrew-f13`). GitHub Releases remain the canonical artifact source. S73 (release-workflow integration to auto-bump the cask formula) is optional. Feature branch `feat/phase12-homebrew`, single PR. |
 | v0.8.0 | **Phase 13 (S81–S86)** Full preset — RAG + summary + parser | planned | New `full` preset alongside today's `basic`. RAG, summary, parser services templated and gated by Compose profiles + `ENABLED_FEATURES`. Ollama picker grows an embedding-model selection when RAG is in the preset. Preflight learns to estimate per-service RAM/disk against host resources. Single preset radio (basic / full), no per-service toggles yet. Transcription explicitly deferred. Feature branch `feat/phase13-full-preset`, single PR. Mostly loop-runnable; S81 (upstream catalog research) is maintainer-driven. |
-| v0.9.0 | **Phase 14 (S91–S94)** User-adjustable microservice set | planned | Replace the basic/full radio with a checkbox grid — users mix and match services. Live resource estimation as toggles flip. Dependency enforcement (RAG → embeddings, parser → RAG warned, chat always required). `COMPOSE_PROFILES` + `ENABLED_FEATURES` derived from the selection. Pure UX layer on Phase 13's templates. Feature branch `feat/phase14-adjustable-services`, single PR. Fully loop-runnable. |
+| v0.9.0 | **Phase 14 (S91–S94)** User-adjustable microservice set | planned | Replace the basic/full radio with a checkbox grid — users mix and match services. Live resource estimation as toggles flip. Dependency enforcement (RAG → embedding model on Ollama path, summary → parser as a hard dependency auto-ticked, parser standalone is fine, chat always required). `COMPOSE_PROFILES` + `ENABLED_FEATURES` derived from the selection. Pure UX layer on Phase 13's templates. Feature branch `feat/phase14-adjustable-services`, single PR. Fully loop-runnable. |
 | v0.10.0 | **Phase 15 (S101–S103)** Chat parameter tuning | planned | System prompt, temperature, max input/output tokens exposed in Settings → Chat (GUI) and an optional `--edit-chat-params` flow (shell). Persists to `.state`; chat service restarts on save. No new services, no upstream coordination. Smallest post-distribution phase. Feature branch `feat/phase15-chat-params`, single PR. Fully loop-runnable. |
 | v0.11.0 | **Phase 16 (S111–S115)** Branding / text customization | planned | Logo + favicon upload, color palette picker, text-string overrides — all wired through the existing S16 patched-frontend-build mechanism (no upstream F13 cooperation available, per 2026-05 maintainer decision). Every branding change triggers a ~1–3 min frontend rebuild. Tightly coupled to the pinned `_FRONTEND_GIT_REF`; each upstream frontend bump needs a branding-regression smoke-test. Feature branch `feat/phase16-branding`, single PR. Loop-runnable for wiring; S111 (surface inventory) maintainer-driven. |
 
