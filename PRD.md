@@ -1233,7 +1233,167 @@ headless. No new Svelte UI; this is plumbing.
   swaps for a running F13 stack" — see Maintainer hand-fixes
   above.
 
-### Phase 9: Signed distributables + bundled-mode data paths
+### Phase 9: GUI localization + zoom (no shell wizard changes)
+
+Two user-visible polish features that don't touch the shell
+wizard. **Target release: v0.4.0.** Designed to be ralph-loop
+driven — at least two of the stories below are mechanical
+enough that the loop can land them per its usual iteration
+cadence; the zoom story is research-first and may need
+maintainer judgement after the loop posts its findings.
+
+Mandatory rules unchanged from Phase 7. Backpressure stays
+headless (`cd gui && npm run check && npm run test:unit &&
+cargo check` + the original shellcheck/bats for any shell-side
+changes — which should be zero for this phase). All stories
+land on a single feature branch (`feat/phase9-i18n-zoom`); the
+loop commits per story; a single Phase 9 PR rolls them up for
+maintainer review before merge.
+
+**Scope boundaries:**
+- GUI only. The shell wizard's terminal output stays English
+  — that's the documented operator surface and translating it
+  has a different audience profile (ops, CI, headless).
+- Locale picker is visible **only on the welcome / startup
+  screen**, not in the Settings panel or anywhere else
+  mid-flow. Once chosen, persisted to localStorage and never
+  re-prompted. Rationale: users pick once on first run; a
+  per-screen language switcher would be busywork and dilute
+  the picker's discoverability where it matters.
+- English is the canonical message source. Translators (de,
+  fr, es) translate from English; all message keys live in
+  the en catalog first; missing keys in a translation catalog
+  fall back to English at runtime.
+
+- [ ] **S41: i18n infrastructure + English baseline**
+
+  Pick an i18n library compatible with Tauri 2 + SvelteKit
+  static-adapter + Svelte 5 runes. Candidates: `svelte-i18n`,
+  `@inlang/paraglide-js`, or a hand-rolled `$state`-backed
+  store reading JSON catalogs. Loop should briefly evaluate
+  trade-offs in the commit body, then pick one.
+
+  Deliverables:
+  - Catalog format chosen and one English catalog
+    (`gui/src/lib/i18n/en.json` or equivalent) seeded with
+    every user-visible string in the GUI today. Inventory the
+    strings by grepping `.svelte` files; hardcoded strings
+    become `t("welcome.title")` (or whichever API the chosen
+    library exposes).
+  - Locale-aware store / context that components consume
+    without per-component bootstrapping.
+  - `LOCALE` defaults to English. No picker yet — that's S42.
+  - Existing tests stay green; updated where they grep
+    hardcoded strings that are now translation keys.
+
+  **Backpressure:** `npm run check && npm run test:unit &&
+  cargo check` clean. Coverage on the new i18n module ≥ 75%.
+
+- [ ] **S42: Locale picker on welcome screen + persistence**
+
+  Add a locale picker to the welcome screen. UI shape: small
+  dropdown or four-button row (EN / DE / FR / ES) in a
+  non-intrusive position (header corner or below the kicker).
+  Choosing a locale:
+  - Persists to `localStorage` under
+    `f13.configurator.locale`.
+  - Updates the i18n store immediately so subsequent screens
+    render in the new language.
+  - **Does NOT appear anywhere else** — not in Settings, not
+    in the status hero, not in error toasts. Welcome-screen
+    only.
+
+  Default behaviour:
+  - First run, no stored locale: default to English. (Don't
+    auto-detect system locale for v0.4.0 — keeps the surface
+    predictable.)
+  - Stored locale present: load it before the welcome screen
+    renders so the user never sees an English flash on
+    return visits.
+
+  **Backpressure:** vitest assertions covering: picker
+  renders four options, click persists to localStorage,
+  stored value survives reload (simulated), absent
+  localStorage falls back to English.
+
+- [ ] **S43: German, French, Spanish translations**
+
+  Translate the entire English catalog from S41 into `de.json`,
+  `fr.json`, `es.json`. This is the mechanical pass — the loop
+  can do straightforward translation. Maintainer reviews the
+  output for cultural / register issues before the Phase 9 PR
+  merges.
+
+  Constraints:
+  - Match the English message-id surface exactly (no missing
+    keys, no extras). A test fixture should iterate
+    `Object.keys(en)` and assert each is present in de/fr/es;
+    a missing translation should fail the test, not silently
+    fall back.
+  - For F13-specific brand terms (`F13`, `Ollama`, `Docker`,
+    `mock`, `compose`, etc.) keep the English spelling. Don't
+    translate proper nouns.
+  - Tone: neutral, instructive (matching the existing English
+    copy). Formal "Sie" for German; "vous" for French; "usted"
+    or neutral infinitive for Spanish — pick what feels right
+    in context.
+
+  **Backpressure:** vitest covers key-parity across all four
+  locales. No additional UI tests needed; switching the locale
+  in vitest and asserting a known phrase renders in the
+  expected language is enough.
+
+- [ ] **S44: Zoom — research, then implementation**
+
+  The GUI currently has no way for users to zoom in, and on
+  high-DPI laptops the text can feel cramped. Implement zoom.
+
+  **Step 1 — research** (loop commits a `gui/ZOOM-NOTES.md`
+  or includes the analysis in the implementation commit body):
+
+  Does Tauri 2 propagate the OS-level zoom shortcuts
+  (`Ctrl/Cmd + +/-/0`) to the webview? Check each platform:
+  - macOS: WKWebView default; does it work out of the box, or
+    does Tauri intercept the shortcuts?
+  - Windows: WebView2; similar question.
+  - Linux: WebKitGTK; similar question.
+
+  If shortcuts don't work natively, the alternatives are:
+  - **Webview-API approach**: call platform-specific APIs from
+    Rust to set zoom factor (WKWebView `setMagnification`,
+    WebView2 `ZoomFactor`, WebKitGTK `set_zoom_level`). Expose
+    via a Tauri command that the frontend invokes.
+  - **CSS-zoom approach**: scale the root via CSS
+    `transform: scale()` or `zoom:` property; track factor in
+    a Svelte store. Simpler but accessibility-suspect (screen
+    readers may misreport, focus rings may blur).
+
+  **Step 2 — implementation** (the chosen approach):
+
+  Provide both: keyboard shortcuts (`Ctrl/Cmd + +/-/0` — `+`
+  zooms in, `-` zooms out, `0` resets) AND a small zoom
+  control in the header / Settings panel (whichever fits the
+  existing chrome better — loop decides). Persist the zoom
+  factor to `localStorage` under `f13.configurator.zoom` so
+  it survives restart. Clamp to a reasonable range (e.g.
+  0.6x – 2.0x).
+
+  **Hand-verifiable:** zoom in/out via shortcut and via UI
+  control on macOS; text scales smoothly; reset returns to
+  100%; zoom factor persists across app restart. Linux
+  parity verified in a follow-up session.
+
+  **Backpressure:** vitest on the store + clamp logic; a
+  smoke test of the keyboard handler (jsdom-friendly).
+
+---
+
+> **Status:** all stories `[ ]` — feature branch
+> `feat/phase9-i18n-zoom` will be created by the loop on
+> first iteration; a Phase 9 PR opens once S41 lands and
+> accumulates the rest as commits.
+
+### Phase 10: Signed distributables + bundled-mode data paths
 
 Two intertwined deliverables: produce the actual installer
 artifacts AND fix the dev-only path assumptions baked into HF1.
@@ -1241,11 +1401,14 @@ artifacts AND fix the dev-only path assumptions baked into HF1.
 The current GUI uses `dev_workspace_root() / "generated"`
 (== `configurator_v1/generated/`) as its data path. That only
 works in a dev checkout — bundled `.app` / `.AppImage` /
-`.deb` installs have no such tree. Phase 9 swaps the bundled
+`.deb` installs have no such tree. Phase 10 swaps the bundled
 branch over to the OS-canonical user-data location and teaches
 `f13-stop` / `f13-reset` to discover it.
 
-- [ ] **S41: `appLocalDataDir` for bundled installs**
+Previously numbered Phase 9 — bumped to Phase 10 in v0.3.2 to
+make room for the new i18n + zoom Phase 9 targeted at v0.4.0.
+
+- [ ] **S51: `appLocalDataDir` for bundled installs**
 
   - Rust: `get_generated_dir()`'s bundled branch returns
     `app.path().app_local_data_dir().join("generated")`.
@@ -1257,7 +1420,7 @@ branch over to the OS-canonical user-data location and teaches
   - Sidecar resources (`bin/`, `lib/`, `templates/`) bundled via
     Tauri's `resources` config (already in place from S29).
 
-- [ ] **S42: Discovery in `f13-stop` / `f13-reset`**
+- [ ] **S52: Discovery in `f13-stop` / `f13-reset`**
 
   Today the shell scripts only look at their own `${SCRIPT_DIR}/
   ../generated`. Extend with:
@@ -1273,7 +1436,7 @@ branch over to the OS-canonical user-data location and teaches
 
   Bats tests for each branch.
 
-- [ ] **S43: Code signing (macOS)**
+- [ ] **S53: Code signing (macOS)**
 
   - Apple Developer ID Application certificate.
   - `tauri.conf.json bundle.macOS.signingIdentity`.
@@ -1281,14 +1444,14 @@ branch over to the OS-canonical user-data location and teaches
   - Document the maintainer setup in `gui/SIGNING.md`
     (gitignored — has cert names + workflow but no secrets).
 
-- [ ] **S44: `.dmg` production**
+- [ ] **S54: `.dmg` production**
 
   Set `bundle.targets` to include `dmg`. Signed + notarized
   output. Smoke test on a clean macOS box (no developer tools)
   to confirm Gatekeeper accepts it. Document the install flow
   in README's "Quickstart" with a download link.
 
-- [ ] **S45: `.AppImage` and `.deb` production**
+- [ ] **S55: `.AppImage` and `.deb` production**
 
   - AppImage tooling (linuxdeploy + appimagetool).
   - Debian control metadata (postinst / postrm scripts that
@@ -1296,7 +1459,7 @@ branch over to the OS-canonical user-data location and teaches
   - Smoke test on Ubuntu 22.04 + 24.04.
   - Document in README.
 
-- [ ] **S46: GitHub Releases automation**
+- [ ] **S56: GitHub Releases automation**
 
   - `.github/workflows/release.yml`: on tag push (`v*`), build
     `.dmg` on macos-latest + `.AppImage`/`.deb` on
@@ -1304,12 +1467,12 @@ branch over to the OS-canonical user-data location and teaches
   - Maintainer reviews + publishes the Release manually
     (no auto-publish).
 
-- [ ] **S47: Optional auto-update**
+- [ ] **S57: Optional auto-update**
 
   Tauri's updater plugin — opt-in via a settings toggle.
   Update manifest hosted in the GitHub Release (signed). If
-  this proves more work than the rest of Phase 9 combined,
-  defer to v0.5.0.
+  this proves more work than the rest of Phase 10 combined,
+  defer to v0.6.0.
 
 ---
 
@@ -1326,14 +1489,17 @@ The PRD's story sequence maps onto the GitHub release line as follows:
 | v0.3.0 | **Phase 8 (S37–S40)** Linux runtime parity + image pinning + UX polish | shipped | GUI mostly stable on macOS + Linux (WSL2 Ubuntu 22.04 validated). Maintainer hand-fixes: secret-file mode 0644 for Linux bind-mounts (S39), `apply_linux_runtime_defaults()` silences libEGL/DMA-BUF warnings (S37), `host.docker.internal:host-gateway` confirmed under WSL2 + Docker Desktop (S38), `feedback_db.secret` round-trips through `edit` so postgres volume stays aligned, Tailwind v4 ProgressBar keyframe hoist, embedding-model alert in Ollama picker, soft warnings against embedding selections, image pins (core v2.0.0, chat v1.2.0, postgres 17, frontend git ref v2.0.0 → `f13-frontend:v2.0.0_based`), `frontend::get_source` always clones the pinned tag. HF4 (reconfigure no-op on backend swap) found and documented; doesn't block normal use. Ralph loop NOT used for any of this — interactive maintainer + Claude Code sessions on the actual Linux box. |
 | v0.3.1 | **HF4** — reconfigure flow re-renders on backend swap | shipped | Single ship covering three compounding bugs (env clobber in `state::read`, `F13_STATE_ACTION` shadowed before `state::check`, running stack not stopped before re-render) plus a GUI early-stop on the Reconfigure button so the wizard's port-check screen sees free ports. Validated on macOS via manual smoke (mock → Ollama → mock → fresh init); Linux validation deferred to next WSL2 session — pure logic/state-machine fix, no Linux-specific surface. PR #1 squashed as `f342a1f`. Ralph loop NOT used. |
 | v0.3.2 | **HF2 + HF3 + tauri 2.11.1** — Cancel kills wizard subprocess; missing-image precondition; Dependabot bump | shipped | HF2 plumbed `AbortSignal` end-to-end with a double-down mitigation for the orphaned `docker compose up` grandchild (proper kill-process-group fix deferred). HF3 pinned `pull_policy: never` on the frontend service and added a `docker image inspect` precondition in `compose::up` with the failure reason propagated through `COMPOSE_ERROR_MESSAGE` into the `done` event so the GUI's toast surfaces the friendly text. Tauri 2.10.3 → 2.11.1 via Dependabot #2 (Cargo.lock only). PR #3 squashed as `69f9bff`. Ralph loop NOT used. |
-| v0.4.0 | **Phase 9 (S41–S47)** Signed distributables + bundled-mode data paths | planned | `appLocalDataDir` for bundled installs (replaces dev-only path), `f13-stop`/`f13-reset` discovery, signed `.dmg`, `.AppImage` + `.deb`, GitHub Releases automation, optional auto-update |
+| v0.4.0 | **Phase 9 (S41–S44)** GUI localization + zoom | planned | English / German / French / Spanish translations of every GUI string; locale picker on the welcome screen only (persisted to localStorage); zoom support via keyboard shortcuts and a small UI control (loop researches Tauri-2 zoom approach before implementing). Shell wizard terminal output stays English. Targeted ralph-loop phase — at least S41 (i18n infra) and S43 (translations) are mechanical fits; S44 (zoom) is research-first. Single Phase 9 PR rolls up all stories. |
+| v0.5.0 | **Phase 10 (S51–S57)** Signed distributables + bundled-mode data paths | planned | `appLocalDataDir` for bundled installs (replaces dev-only path), `f13-stop`/`f13-reset` discovery, signed `.dmg`, `.AppImage` + `.deb`, GitHub Releases automation, optional auto-update |
 
 Linux runtime parity (Phase 8) shipped in v0.3.0 via
 maintainer-side WSL2 testing. HF4 landed as v0.3.1; HF2 + HF3
 landed as v0.3.2 alongside the tauri 2.11.1 Dependabot bump.
 HF5 (auto-regenerate broken stack on Start, no wizard walk
 required) is the next loose end and is scoped for a future
-v0.3.x patch. Phase 9
+v0.3.x patch. Phase 9 (i18n + zoom, v0.4.0) is the next
+loop-driven phase; Phase 10 (signed distributables, was
+Phase 9, retargeted v0.5.0)
 is no longer gated on Linux runtime stability (that gate
 cleared in v0.3.0); it's gated on the maintainer wanting to
 ship signed installer artifacts.
