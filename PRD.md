@@ -1060,7 +1060,10 @@ deferred past v0.2.2 to a later v0.2.x patch.
   larger goal.
 
 - [ ] **HF5: Auto-regenerate broken stack on Start instead of
-  forcing user through Reconfigure wizard.** Open. When the
+  forcing user through Reconfigure wizard.** Open, **deferred —
+  not for the ralph loop**. Maintainer-driven (needs UX
+  judgement on the button shape). Land as a separate v0.3.x
+  patch after Phase 9 ships. When the
   precondition guard from HF3 fires (e.g. the locally built
   frontend image is missing because the user pruned it, or
   the Docker daemon was reinstalled, or the generated/ folder
@@ -1407,6 +1410,12 @@ branch over to the OS-canonical user-data location and teaches
 
 Previously numbered Phase 9 — bumped to Phase 10 in v0.3.2 to
 make room for the new i18n + zoom Phase 9 targeted at v0.4.0.
+
+> **⛔ Out of scope for the ralph loop until Phase 9 has shipped.**
+> Phase 10 needs signing certificates, GitHub release secrets, and
+> Linux-distro packaging tooling — none of which the headless loop
+> container has access to. Stories S51–S57 will be picked up by the
+> maintainer after v0.4.0.
 
 - [ ] **S51: `appLocalDataDir` for bundled installs**
 

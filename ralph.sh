@@ -101,26 +101,42 @@ Read /PRD.md for all rules. Key points:
   credentials, so push attempts would fail anyway.
 
 ## Story tracks
-- S00–S15: shell wizard core (Phase 0–5, complete).
-- S16: patched frontend image with feature gating (Phase 6, complete).
-- S17–S31: desktop GUI (Phase 7, in progress). Lives under `gui/`.
-  Stack: Tauri 2.x + Svelte 5 + Vite + Tailwind 4 + TypeScript strict.
-  Backpressure for GUI stories (HEADLESS, no display required):
-      cd gui && npm run check && npm run test:unit && cargo check
-  Plus the original shellcheck + bats for any non-gui changes.
-  Invoke /frontend-design-v2 skill before writing any .svelte file
-  with UI. Coverage target on TS/Svelte: >= 75%.
+- S00–S15: shell wizard core (Phase 0–5, complete, shipped v0.1.0).
+- S16: patched frontend image with feature gating (Phase 6, complete, v0.1.0).
+- S17–S31: desktop GUI (Phase 7, complete, shipped v0.2.0).
+- S32 + S34: Phase 7.5 polish (complete, shipped v0.2.2).
+- S37–S40: Phase 8 Linux runtime parity (complete, shipped v0.3.0).
+- HF1 / HF2 / HF3 / HF4: maintainer hand-fixes (v0.2.2 / v0.3.2 / v0.3.2 / v0.3.1).
+
+### Current loop target: Phase 9 — GUI i18n + zoom (target v0.4.0)
+
+Active stories: **S41, S42, S43, S44** — see PROGRESS.md "Pending
+Stories — Phase 9" section. S41 (i18n infra) lands first; the rest
+build on it.
+
+Stack: Tauri 2.x + Svelte 5 + Vite + Tailwind 4 + TypeScript strict.
+Backpressure (HEADLESS):
+    cd gui && npm run check && npm run test:unit && cargo check
+Phase 9 is GUI-only; no shell-wizard changes expected.
+
+Invoke /frontend-design-v2 skill before any .svelte UI file.
+Coverage on TS/Svelte: >= 75%.
+
+Feature branch: feat/phase9-i18n-zoom. Commit each story onto it;
+do NOT open per-story PRs. A single Phase 9 PR at the end.
 
   🚫 NEVER run `npm run tauri dev`, `tauri dev`, `cargo run`,
   `npm run tauri build`, or any Tauri WebDriver E2E inside the loop.
   The loop is headless; those commands hang waiting for a window.
-  Visual / interactive verification is the maintainer's job, on
-  macOS, outside the loop.
 
-  🍎 GUI validation target is macOS only until Phase 8. The loop
-  exercises the Linux *compile* path (cargo check) inside Docker
-  but no Linux runtime or distribution. Do NOT add .AppImage / .deb
-  / Linux runtime tests to any story in Phase 7.
+### Out of scope for this loop — do NOT pick from these
+
+- HF5 in /PRD.md (auto-regenerate broken stack) — deferred to a
+  future v0.3.x patch; needs maintainer UX judgement.
+- Phase 10 / S51–S57 in /PRD.md (signed distributables) — targeted
+  at v0.5.0 after Phase 9 ships.
+- Any shell-wizard / bin/* / lib/*.sh / templates/* change unless a
+  Phase 9 story explicitly requires it.
 CLAUDEMD
   echo -e "${GREEN}Created $WORKDIR/CLAUDE.md${NC}"
 fi
