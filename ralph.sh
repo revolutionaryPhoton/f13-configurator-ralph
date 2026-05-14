@@ -132,7 +132,7 @@ do NOT open per-story PRs. A single Phase 9 PR at the end.
 ### Out of scope for this loop — do NOT pick from these
 
 - HF5 in /PRD.md (auto-regenerate broken stack) — deferred to a
-  future v0.3.x patch; needs maintainer UX judgement.
+  v0.4.x patch after Phase 9 ships; needs maintainer UX judgement.
 - Phase 10 / S51–S57 in /PRD.md (signed distributables) — targeted
   at v0.5.0 after Phase 9 ships.
 - Any shell-wizard / bin/* / lib/*.sh / templates/* change unless a

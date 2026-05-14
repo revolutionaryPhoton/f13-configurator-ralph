@@ -1062,7 +1062,7 @@ deferred past v0.2.2 to a later v0.2.x patch.
 - [ ] **HF5: Auto-regenerate broken stack on Start instead of
   forcing user through Reconfigure wizard.** Open, **deferred —
   not for the ralph loop**. Maintainer-driven (needs UX
-  judgement on the button shape). Land as a separate v0.3.x
+  judgement on the button shape). Land as a separate v0.4.x
   patch after Phase 9 ships. When the
   precondition guard from HF3 fires (e.g. the locally built
   frontend image is missing because the user pruned it, or
@@ -1505,10 +1505,10 @@ Linux runtime parity (Phase 8) shipped in v0.3.0 via
 maintainer-side WSL2 testing. HF4 landed as v0.3.1; HF2 + HF3
 landed as v0.3.2 alongside the tauri 2.11.1 Dependabot bump.
 HF5 (auto-regenerate broken stack on Start, no wizard walk
-required) is the next loose end and is scoped for a future
-v0.3.x patch. Phase 9 (i18n + zoom, v0.4.0) is the next
-loop-driven phase; Phase 10 (signed distributables, was
-Phase 9, retargeted v0.5.0)
+required) is the next loose end and is scoped for a v0.4.x
+patch after Phase 9 (i18n + zoom, v0.4.0) ships. Phase 9 is
+the next loop-driven phase; Phase 10 (signed distributables,
+was Phase 9, retargeted v0.5.0)
 is no longer gated on Linux runtime stability (that gate
 cleared in v0.3.0); it's gated on the maintainer wanting to
 ship signed installer artifacts.
