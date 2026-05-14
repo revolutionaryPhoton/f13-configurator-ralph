@@ -988,8 +988,19 @@ deferred past v0.2.2 to a later v0.2.x patch.
   compose errors. Cannot be automated without spinning real
   containers in CI.
 
-- [ ] **HF4: Reconfigure flow doesn't actually re-render with
-  the new selections.** Open. Two compounding bugs make the
+- [x] **HF4: Reconfigure flow doesn't actually re-render with
+  the new selections.** ✅ shipped in v0.3.1 (squash commit
+  `f342a1f`, PR #1). Three compounding bugs ended up being in
+  scope — the original two below plus a third discovered
+  during smoke testing (`F13_STATE_ACTION` was unconditionally
+  cleared before `state::check` could read the env value).
+  Plus a fourth UX issue: the GUI's port-check screen happens
+  before the wizard runs, so the early-stop has to fire on the
+  Reconfigure button click, not just inside the shell wizard.
+
+  Original analysis preserved below for historical context.
+
+  Two compounding bugs make the
   GUI's "Reconfigure" path silently no-op when the user
   changes the chat backend (mock ↔ Ollama) or any other
   wizard input on a running stack:
@@ -1271,11 +1282,13 @@ The PRD's story sequence maps onto the GitHub release line as follows:
 | v0.2.1 | Design polish (no new phase) | shipped | Zinc visual direction across all seven screens |
 | v0.2.2 | Phase 7.5 (S32 + S34) + HF1 + UX polish + dependabot | shipped | macOS GUI mostly stable for daily local use. Loop landed S32 + S34; HF1 done across four iterations; Stop/Start cycle, Stopped badge, Reset Enter-key, Ollama free-text/cloud links; cookie 0.7 override + 2 Rust alerts dismissed; 288/288 vitest. HF2 + HF3 deferred (don't block normal use). |
 | v0.3.0 | **Phase 8 (S37–S40)** Linux runtime parity + image pinning + UX polish | shipped | GUI mostly stable on macOS + Linux (WSL2 Ubuntu 22.04 validated). Maintainer hand-fixes: secret-file mode 0644 for Linux bind-mounts (S39), `apply_linux_runtime_defaults()` silences libEGL/DMA-BUF warnings (S37), `host.docker.internal:host-gateway` confirmed under WSL2 + Docker Desktop (S38), `feedback_db.secret` round-trips through `edit` so postgres volume stays aligned, Tailwind v4 ProgressBar keyframe hoist, embedding-model alert in Ollama picker, soft warnings against embedding selections, image pins (core v2.0.0, chat v1.2.0, postgres 17, frontend git ref v2.0.0 → `f13-frontend:v2.0.0_based`), `frontend::get_source` always clones the pinned tag. HF4 (reconfigure no-op on backend swap) found and documented; doesn't block normal use. Ralph loop NOT used for any of this — interactive maintainer + Claude Code sessions on the actual Linux box. |
+| v0.3.1 | **HF4** — reconfigure flow re-renders on backend swap | shipped | Single ship covering three compounding bugs (env clobber in `state::read`, `F13_STATE_ACTION` shadowed before `state::check`, running stack not stopped before re-render) plus a GUI early-stop on the Reconfigure button so the wizard's port-check screen sees free ports. Validated on macOS via manual smoke (mock → Ollama → mock → fresh init); Linux validation deferred to next WSL2 session — pure logic/state-machine fix, no Linux-specific surface. PR #1 squashed as `f342a1f`. Ralph loop NOT used. |
 | v0.4.0 | **Phase 9 (S41–S47)** Signed distributables + bundled-mode data paths | planned | `appLocalDataDir` for bundled installs (replaces dev-only path), `f13-stop`/`f13-reset` discovery, signed `.dmg`, `.AppImage` + `.deb`, GitHub Releases automation, optional auto-update |
 
 Linux runtime parity (Phase 8) shipped in v0.3.0 via
-maintainer-side WSL2 testing. HF2, HF3, HF4 land when
-convenient as v0.3.x patches — none block normal use. Phase 9
+maintainer-side WSL2 testing. HF4 landed as v0.3.1; HF2 and
+HF3 remain open and land when convenient as further v0.3.x
+patches — neither blocks normal use. Phase 9
 is no longer gated on Linux runtime stability (that gate
 cleared in v0.3.0); it's gated on the maintainer wanting to
 ship signed installer artifacts.
