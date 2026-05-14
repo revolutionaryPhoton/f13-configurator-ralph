@@ -1060,6 +1060,49 @@ deferred past v0.2.2 to a later v0.2.x patch.
   for a running F13 stack" — HF4 is the unblocker for that
   larger goal.
 
+- [ ] **HF5: Auto-regenerate broken stack on Start instead of
+  forcing user through Reconfigure wizard.** Open. When the
+  precondition guard from HF3 fires (e.g. the locally built
+  frontend image is missing because the user pruned it, or
+  the Docker daemon was reinstalled, or the generated/ folder
+  drifted), the user currently has to click Reconfigure on
+  /status and walk the full wizard (preflight → inference →
+  ollama → ports → run) just to rebuild the missing image —
+  even though none of their saved selections need to change.
+  The wizard's state file has everything required; the user
+  shouldn't have to re-enter it.
+
+  **Fix sketch:**
+  - When the GUI's Start action surfaces a "frontend image
+    missing" (or, more generally, any precondition failure
+    that the build step would fix) error, offer a single
+    "Rebuild and start" button on /status.
+  - That button re-runs the wizard non-interactively with
+    `stateAction:"edit"` and the existing `.state` values,
+    skipping all prompts — same plumbing as HF4 but invoked
+    automatically instead of via Reconfigure.
+  - Optionally: detect the precondition proactively on
+    /status load so the user sees "rebuild needed" before
+    clicking Start.
+
+  **Hand-verifiable:** with F13 stopped, `docker image rm
+  f13-frontend:v2.0.0_based` to break the precondition; the
+  Start button on /status should change to "Rebuild and
+  start" (or show the same after a failed Start), single
+  click should rebuild and bring the stack up without any
+  wizard navigation. Cannot be fully automated since it
+  needs a real container runtime, but the rebuild trigger
+  itself (state-driven non-interactive wizard run) is
+  testable via existing bats + vitest patterns.
+
+  **Likely-others note.** The same UX gap applies to any
+  precondition that's fixable by re-running the wizard's
+  render/build/pull steps — e.g. a stale `.env` (HF6-class),
+  a half-deleted compose file, a missing secret. HF5 is
+  scoped to the frontend-image case first; if the pattern
+  proves useful, generalise to a "regenerate" action on
+  /status that runs the full edit-mode wizard non-interactively.
+
 ### Phase 8: Linux runtime parity (no new screens)
 
 Goal: validate the existing Phase 7 / 7.5 GUI end-to-end on Linux
