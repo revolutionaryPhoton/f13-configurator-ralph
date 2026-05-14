@@ -1059,51 +1059,12 @@ deferred past v0.2.2 to a later v0.2.x patch.
   for a running F13 stack" — HF4 is the unblocker for that
   larger goal.
 
-- [ ] **HF5: Auto-regenerate broken stack on Start instead of
-  forcing user through Reconfigure wizard.** Open, **deferred —
-  not for the ralph loop**. Maintainer-driven (needs UX
-  judgement on the button shape). Land as a separate v0.4.x
-  patch after Phase 9 ships. When the
-  precondition guard from HF3 fires (e.g. the locally built
-  frontend image is missing because the user pruned it, or
-  the Docker daemon was reinstalled, or the generated/ folder
-  drifted), the user currently has to click Reconfigure on
-  /status and walk the full wizard (preflight → inference →
-  ollama → ports → run) just to rebuild the missing image —
-  even though none of their saved selections need to change.
-  The wizard's state file has everything required; the user
-  shouldn't have to re-enter it.
-
-  **Fix sketch:**
-  - When the GUI's Start action surfaces a "frontend image
-    missing" (or, more generally, any precondition failure
-    that the build step would fix) error, offer a single
-    "Rebuild and start" button on /status.
-  - That button re-runs the wizard non-interactively with
-    `stateAction:"edit"` and the existing `.state` values,
-    skipping all prompts — same plumbing as HF4 but invoked
-    automatically instead of via Reconfigure.
-  - Optionally: detect the precondition proactively on
-    /status load so the user sees "rebuild needed" before
-    clicking Start.
-
-  **Hand-verifiable:** with F13 stopped, `docker image rm
-  f13-frontend:v2.0.0_based` to break the precondition; the
-  Start button on /status should change to "Rebuild and
-  start" (or show the same after a failed Start), single
-  click should rebuild and bring the stack up without any
-  wizard navigation. Cannot be fully automated since it
-  needs a real container runtime, but the rebuild trigger
-  itself (state-driven non-interactive wizard run) is
-  testable via existing bats + vitest patterns.
-
-  **Likely-others note.** The same UX gap applies to any
-  precondition that's fixable by re-running the wizard's
-  render/build/pull steps — e.g. a stale `.env` (HF6-class),
-  a half-deleted compose file, a missing secret. HF5 is
-  scoped to the frontend-image case first; if the pattern
-  proves useful, generalise to a "regenerate" action on
-  /status that runs the full edit-mode wizard non-interactively.
+- [ ] **HF5: Auto-regenerate broken stack on Start.** Promoted
+  from a maintainer hand-fix to a planned story — now tracked
+  as **S61 in Phase 11** (target v0.6.0). The discovery context
+  is preserved in S61's body. This bullet stays here as a
+  cross-reference so anyone scanning the maintainer-hand-fixes
+  section after HF4 doesn't think the trail ends at HF4.
 
 ### Phase 8: Linux runtime parity (no new screens)
 
@@ -1400,6 +1361,7 @@ maintainer review before merge.
 
 Two intertwined deliverables: produce the actual installer
 artifacts AND fix the dev-only path assumptions baked into HF1.
+**Target release: v0.5.0.**
 
 The current GUI uses `dev_workspace_root() / "generated"`
 (== `configurator_v1/generated/`) as its data path. That only
@@ -1409,13 +1371,29 @@ branch over to the OS-canonical user-data location and teaches
 `f13-stop` / `f13-reset` to discover it.
 
 Previously numbered Phase 9 — bumped to Phase 10 in v0.3.2 to
-make room for the new i18n + zoom Phase 9 targeted at v0.4.0.
+make room for the new i18n + zoom Phase 9 (shipped v0.4.0).
 
-> **⛔ Out of scope for the ralph loop until Phase 9 has shipped.**
-> Phase 10 needs signing certificates, GitHub release secrets, and
-> Linux-distro packaging tooling — none of which the headless loop
-> container has access to. Stories S51–S57 will be picked up by the
-> maintainer after v0.4.0.
+> **Mixed loop / maintainer phase.** S51 and S52 are pure code
+> and loop-runnable; the loop can land them as soon as PROGRESS.md
+> queues them. S53–S56 are maintainer-driven because they need
+> signing certificates and GitHub release secrets the headless
+> loop container can't have. The auto-update story (formerly S57)
+> moved to Phase 11 to keep this phase focused on first-distribution.
+
+**Target architectures (decided 2026-05-14):**
+- macOS: **arm64 only** (Apple Silicon). No universal binary —
+  the size cost isn't worth it for the small Intel-Mac audience
+  at this point.
+- Linux: **x86_64 only**. arm64 Linux desktop is rare enough
+  that it's not worth the matrix expansion.
+- Distribution channel: **GitHub Releases only** for v0.5.0.
+  Homebrew cask is scoped to Phase 12.
+
+**Branch + PR workflow:** all Phase 10 work lands on a single
+feature branch `feat/phase10-distributables`. Stories commit
+onto it incrementally; a single Phase 10 PR rolls everything up
+for maintainer review before merging to `main` and tagging
+v0.5.0.
 
 - [ ] **S51: `appLocalDataDir` for bundled installs**
 
@@ -1428,6 +1406,9 @@ make room for the new i18n + zoom Phase 9 targeted at v0.4.0.
     `resource_dir/bin`, dev returns `configurator_v1/bin`.
   - Sidecar resources (`bin/`, `lib/`, `templates/`) bundled via
     Tauri's `resources` config (already in place from S29).
+
+  **Loop-runnable.** Pure Rust + tauri.conf.json change. Existing
+  vitest + cargo check backpressure covers it.
 
 - [ ] **S52: Discovery in `f13-stop` / `f13-reset`**
 
@@ -1443,45 +1424,171 @@ make room for the new i18n + zoom Phase 9 targeted at v0.4.0.
   4. If multiple match, error and require explicit
      `--gen-dir <path>` or env override.
 
-  Bats tests for each branch.
+  Bats tests for each branch. **Loop-runnable.**
 
-- [ ] **S53: Code signing (macOS)**
+- [ ] **S53: Code signing (macOS arm64)**
 
-  - Apple Developer ID Application certificate.
-  - `tauri.conf.json bundle.macOS.signingIdentity`.
-  - Notarization workflow (notarytool / app-specific password).
+  - Apple Developer ID Application certificate (maintainer holds
+    the cert in their keychain; CI receives a base64-encoded .p12
+    via `MACOS_CERTIFICATE` repo secret).
+  - `tauri.conf.json bundle.macOS.signingIdentity` set to the
+    Team-ID-qualified cert name.
+  - Notarization via `xcrun notarytool` with an app-specific
+    password (repo secrets: `APPLE_ID`, `APPLE_PASSWORD`,
+    `APPLE_TEAM_ID`).
   - Document the maintainer setup in `gui/SIGNING.md`
     (gitignored — has cert names + workflow but no secrets).
 
-- [ ] **S54: `.dmg` production**
+  **Maintainer-driven.** Cert + secrets are not available to the
+  loop. macOS-only build target: `aarch64-apple-darwin`.
 
-  Set `bundle.targets` to include `dmg`. Signed + notarized
-  output. Smoke test on a clean macOS box (no developer tools)
-  to confirm Gatekeeper accepts it. Document the install flow
-  in README's "Quickstart" with a download link.
+- [ ] **S54: `.dmg` production (arm64)**
 
-- [ ] **S55: `.AppImage` and `.deb` production**
+  Set `bundle.targets` to `["dmg"]` for the macOS profile. Signed
+  + notarized output, single-architecture `aarch64-apple-darwin`.
+  Smoke test on a clean Apple Silicon Mac (no developer tools
+  installed) to confirm Gatekeeper accepts it. Document the
+  install flow in README's "Quickstart" with a download link.
+
+  **Maintainer-driven.** Depends on S53.
+
+- [ ] **S55: `.AppImage` and `.deb` production (x86_64)**
 
   - AppImage tooling (linuxdeploy + appimagetool).
   - Debian control metadata (postinst / postrm scripts that
     register `de.f13-os.configurator` desktop file).
+  - Single architecture: `x86_64-unknown-linux-gnu`. No arm64
+    Linux builds for v0.5.0.
   - Smoke test on Ubuntu 22.04 + 24.04.
   - Document in README.
+  - Optional: GPG-sign artifacts if maintainer provides a key.
+
+  **Maintainer-driven** (or loop-runnable for the workflow YAML;
+  signing/smoke-testing stays maintainer-side).
 
 - [ ] **S56: GitHub Releases automation**
 
   - `.github/workflows/release.yml`: on tag push (`v*`), build
-    `.dmg` on macos-latest + `.AppImage`/`.deb` on
-    ubuntu-latest, sign / notarize, attach to a draft Release.
+    `.dmg` on `macos-latest` (arm64 target) + `.AppImage` / `.deb`
+    on `ubuntu-latest` (x86_64), sign / notarize, attach to a
+    **draft** Release.
   - Maintainer reviews + publishes the Release manually
-    (no auto-publish).
+    (no auto-publish). This matches the manual-publish convention
+    established in v0.3.x.
 
-- [ ] **S57: Optional auto-update**
+  **Maintainer-driven** to wire up the secrets; the workflow YAML
+  itself can be drafted by the loop once secrets are configured.
 
-  Tauri's updater plugin — opt-in via a settings toggle.
-  Update manifest hosted in the GitHub Release (signed). If
-  this proves more work than the rest of Phase 10 combined,
-  defer to v0.6.0.
+### Phase 11: UX polish + auto-update
+
+Two stories that pair well thematically — both are post-distribution
+polish that smooths over rough edges Phase 10 leaves behind. **Target
+release: v0.6.0.**
+
+S61 is the former HF5 ("auto-regenerate broken stack on Start"),
+promoted from a maintainer hand-fix to a proper loop-runnable story
+since it's pure GUI plumbing. S62 is the former S57, deferred from
+Phase 10 to keep that release focused on first-distribution.
+
+**Branch + PR workflow:** single feature branch
+`feat/phase11-polish-autoupdate`, single Phase 11 PR.
+
+- [ ] **S61: Auto-regenerate broken stack on Start**
+
+  Originally tracked as HF5. When the Start action fails because of
+  a fixable precondition (today: the locally built frontend image is
+  missing, surfaced by HF3's `compose::up` precondition; tomorrow:
+  any other build-step-recoverable error), the user should not have
+  to walk the full Reconfigure wizard (preflight → inference →
+  ollama → ports → run) just to rebuild. `.state` already has every
+  selection needed.
+
+  **Fix sketch:**
+  - When the GUI's Start action surfaces a frontend-image-missing
+    error (detect via the `COMPOSE_ERROR_MESSAGE` content shipped
+    in v0.3.2), offer a single "Rebuild and start" button on
+    `/status`.
+  - That button re-runs `runWizardNonInteractive` with
+    `stateAction: "edit"` and the existing `.state` values,
+    skipping all wizard prompts — same plumbing as HF4 but
+    invoked automatically.
+  - Optionally: detect the precondition proactively on `/status`
+    load so the user sees a "Rebuild needed" banner before clicking
+    Start.
+
+  **Hand-verifiable:** with F13 stopped, `docker image rm
+  f13-frontend:v2.0.0_based`; Start button on `/status` should
+  surface "Rebuild and start" (or transition to it after a failed
+  Start), single click should rebuild and bring the stack up
+  without any wizard navigation.
+
+  **Loop-runnable.** Pure GUI plumbing.
+
+- [ ] **S62: Optional auto-update (Tauri updater)**
+
+  Tauri's updater plugin — opt-in via a settings toggle. Update
+  manifest hosted in the GitHub Release (signed with a separate
+  Tauri updater key, distinct from the Apple Developer ID cert).
+
+  **Maintainer-driven.** Requires:
+  - `tauri signer generate` to produce the updater keypair.
+  - `TAURI_PRIVATE_KEY` + `TAURI_KEY_PASSWORD` repo secrets for CI.
+  - Public key embedded in `tauri.conf.json` (committed).
+  - Update workflow appended to `.github/workflows/release.yml`
+    (signs the manifest, attaches to the Release as `latest.json`).
+  - Settings UI toggle (loop-runnable once the plumbing exists).
+
+  Can slip to a v0.6.x patch if it proves more complex than the
+  rest of Phase 11 combined.
+
+### Phase 12: Homebrew distribution
+
+A single-purpose phase: make `brew install --cask f13-configurator`
+work for macOS users. **Target release: v0.7.0.**
+
+GitHub Releases stay the canonical artifact source; Homebrew is a
+convenience layer on top. Requires a Homebrew tap repository
+(`homebrew-f13` or similar under the maintainer's account), a cask
+formula referencing the GitHub Release `.dmg`, and documentation.
+
+**Branch + PR workflow:** single feature branch
+`feat/phase12-homebrew`, single Phase 12 PR.
+
+- [ ] **S71: Create Homebrew tap + cask formula**
+
+  - New repository: `revolutionaryPhoton/homebrew-f13` (or chosen
+    org name).
+  - `Casks/f13-configurator.rb` referencing the latest GitHub
+    Release `.dmg` URL + SHA-256 + version.
+  - `brew tap revolutionaryPhoton/f13 && brew install --cask
+    f13-configurator` should install the app to `/Applications/`.
+
+  **Maintainer-driven.** Needs the tap repo created and seeded.
+
+- [ ] **S72: README install path**
+
+  Document the Homebrew install command in the root README's
+  Quickstart for macOS, alongside the direct `.dmg` download
+  link. Keep the `.dmg` download as the primary path; Homebrew
+  is an alternative.
+
+  **Loop-runnable** once the tap repo exists.
+
+- [ ] **S73: Release-workflow integration (optional)**
+
+  Extend `.github/workflows/release.yml` to bump the cask
+  formula in the tap repo automatically on each GitHub Release.
+  Needs a fine-grained PAT scoped to the tap repo (repo secret
+  `HOMEBREW_TAP_TOKEN`). Manual bump is fine for v0.7.0; this
+  story is optional.
+
+  **Maintainer-driven** for the PAT; YAML is loop-draftable.
+
+> **Future channels (not scoped):** Snap, Flatpak, Microsoft Store,
+> the Mac App Store — all would require additional ceremony
+> (sandboxing, store review, etc.). GitHub Releases + Homebrew
+> covers ~90% of the realistic install paths for this kind of
+> developer tool.
 
 ---
 
@@ -1499,20 +1606,23 @@ The PRD's story sequence maps onto the GitHub release line as follows:
 | v0.3.1 | **HF4** — reconfigure flow re-renders on backend swap | shipped | Single ship covering three compounding bugs (env clobber in `state::read`, `F13_STATE_ACTION` shadowed before `state::check`, running stack not stopped before re-render) plus a GUI early-stop on the Reconfigure button so the wizard's port-check screen sees free ports. Validated on macOS via manual smoke (mock → Ollama → mock → fresh init); Linux validation deferred to next WSL2 session — pure logic/state-machine fix, no Linux-specific surface. PR #1 squashed as `f342a1f`. Ralph loop NOT used. |
 | v0.3.2 | **HF2 + HF3 + tauri 2.11.1** — Cancel kills wizard subprocess; missing-image precondition; Dependabot bump | shipped | HF2 plumbed `AbortSignal` end-to-end with a double-down mitigation for the orphaned `docker compose up` grandchild (proper kill-process-group fix deferred). HF3 pinned `pull_policy: never` on the frontend service and added a `docker image inspect` precondition in `compose::up` with the failure reason propagated through `COMPOSE_ERROR_MESSAGE` into the `done` event so the GUI's toast surfaces the friendly text. Tauri 2.10.3 → 2.11.1 via Dependabot #2 (Cargo.lock only). PR #3 squashed as `69f9bff`. Ralph loop NOT used. |
 | v0.4.0 | **Phase 9 (S41–S44)** GUI localization + zoom | shipped | English / German / French / Spanish translations of every GUI string (176 keys × 4 locales, key parity enforced in CI); locale picker on the welcome screen only, persisted to `f13.configurator.locale`; zoom via `Ctrl/Cmd + +/−/0` shortcuts and a `−` / `100%` / `+` stepper in Settings → Appearance, factor persisted to `f13.configurator.zoom`. Shell wizard terminal output stays English. Ralph loop drove S41–S44; maintainer review added the LS key rename + Settings absence test + localization gaps in the Ollama prose / ports note / reset modal as follow-ups. PR #4 squashed as `dc3d10f`. |
-| v0.5.0 | **Phase 10 (S51–S57)** Signed distributables + bundled-mode data paths | planned | `appLocalDataDir` for bundled installs (replaces dev-only path), `f13-stop`/`f13-reset` discovery, signed `.dmg`, `.AppImage` + `.deb`, GitHub Releases automation, optional auto-update |
+| v0.5.0 | **Phase 10 (S51–S56)** Signed distributables + bundled-mode data paths | planned | `appLocalDataDir` for bundled installs (replaces dev-only path), `f13-stop`/`f13-reset` discovery, signed `.dmg` (macOS arm64 only), `.AppImage` + `.deb` (Linux x86_64 only), GitHub Releases automation with draft + manual publish. Feature branch `feat/phase10-distributables`, single PR. S51 + S52 loop-runnable; S53–S56 maintainer-driven (Apple cert, GitHub release secrets). |
+| v0.6.0 | **Phase 11 (S61 + S62)** UX polish + auto-update | planned | S61: auto-regenerate broken stack on Start instead of forcing user through Reconfigure wizard (former HF5, promoted to a real story since it's pure GUI plumbing). S62: optional Tauri auto-update with separate updater keypair and signed manifest in the GitHub Release (former S57). Feature branch `feat/phase11-polish-autoupdate`, single PR. |
+| v0.7.0 | **Phase 12 (S71–S73)** Homebrew distribution | planned | macOS users can `brew install --cask f13-configurator` from a maintainer-owned tap (`revolutionaryPhoton/homebrew-f13`). GitHub Releases remain the canonical artifact source. S73 (release-workflow integration to auto-bump the cask formula) is optional. Feature branch `feat/phase12-homebrew`, single PR. |
 
 Linux runtime parity (Phase 8) shipped in v0.3.0 via
 maintainer-side WSL2 testing. HF4 landed as v0.3.1; HF2 + HF3
 landed as v0.3.2 alongside the tauri 2.11.1 Dependabot bump;
 Phase 9 (i18n + zoom) shipped as v0.4.0 — the first phase the
 ralph loop drove end-to-end since Phase 7.5. HF5 (auto-regenerate
-broken stack on Start, no wizard walk required) is the next loose
-end and is scoped for a v0.4.x patch when maintainer judgement on
-the UX shape is available. Phase 10 (signed distributables,
-was Phase 9, retargeted v0.5.0)
-is no longer gated on Linux runtime stability (that gate
-cleared in v0.3.0); it's gated on the maintainer wanting to
-ship signed installer artifacts.
+broken stack on Start) was promoted from a maintainer hand-fix
+to a planned story — it's tracked as **S61** in Phase 11. Phase
+10 (signed distributables, was originally Phase 9, retargeted to
+v0.5.0) is gated on the maintainer's Apple Developer enrollment
+and GitHub repo secrets being in place. Phase 11 (v0.6.0) bundles
+the auto-update story (former S57) with HF5/S61 once Phase 10 has
+shipped. Phase 12 (v0.7.0) adds Homebrew cask distribution as a
+convenience layer on top of the canonical GitHub Releases.
 
 ---
 
