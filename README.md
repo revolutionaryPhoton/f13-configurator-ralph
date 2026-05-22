@@ -1,9 +1,22 @@
 # f13-configurator-ralph
 
+![GitHub stars](https://img.shields.io/github/stars/revolutionaryPhoton/f13-configurator-ralph?style=social)
+![GitHub forks](https://img.shields.io/github/forks/revolutionaryPhoton/f13-configurator-ralph?style=social)
+![GitHub watchers](https://img.shields.io/github/watchers/revolutionaryPhoton/f13-configurator-ralph?style=social)
+
 [![CI](https://github.com/revolutionaryPhoton/f13-configurator-ralph/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/revolutionaryPhoton/f13-configurator-ralph/actions/workflows/ci.yml)
 [![Configurator CI](https://github.com/revolutionaryPhoton/f13-configurator/actions/workflows/gui-build.yml/badge.svg?branch=main&label=configurator)](https://github.com/revolutionaryPhoton/f13-configurator/actions/workflows/gui-build.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Made with Claude Code](https://img.shields.io/badge/made_with-Claude_Code-d77757)](https://claude.com/claude-code)
+![GitHub repo size](https://img.shields.io/github/repo-size/revolutionaryPhoton/f13-configurator-ralph)
+![GitHub top language](https://img.shields.io/github/languages/top/revolutionaryPhoton/f13-configurator-ralph)
+![GitHub last commit](https://img.shields.io/github/last-commit/revolutionaryPhoton/f13-configurator-ralph?color=red)
+![GitHub open issues](https://img.shields.io/github/issues/revolutionaryPhoton/f13-configurator-ralph)
+![GitHub open PRs](https://img.shields.io/github/issues-pr/revolutionaryPhoton/f13-configurator-ralph)
+
+[![Bash](https://img.shields.io/badge/Bash-4%2B-4EAA25?logo=gnubash&logoColor=white)](https://www.gnu.org/software/bash/)
+[![Docker](https://img.shields.io/badge/Docker-required-2496ED?logo=docker&logoColor=white)](https://www.docker.com)
+[![Claude Code](https://img.shields.io/badge/drives-Claude_Code-d77757)](https://claude.com/claude-code)
+[![Anthropic API](https://img.shields.io/badge/API-Anthropic-191919?logo=anthropic&logoColor=white)](https://www.anthropic.com)
 
 The Ralph-loop harness that drives Claude Code through the implementation of
 the [F13 Configurator](https://github.com/revolutionaryPhoton/f13-configurator)
