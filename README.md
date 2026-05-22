@@ -1,5 +1,10 @@
 # f13-configurator-ralph
 
+[![CI](https://github.com/revolutionaryPhoton/f13-configurator-ralph/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/revolutionaryPhoton/f13-configurator-ralph/actions/workflows/ci.yml)
+[![Configurator CI](https://github.com/revolutionaryPhoton/f13-configurator/actions/workflows/gui-build.yml/badge.svg?branch=main&label=configurator)](https://github.com/revolutionaryPhoton/f13-configurator/actions/workflows/gui-build.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Made with Claude Code](https://img.shields.io/badge/made_with-Claude_Code-d77757)](https://claude.com/claude-code)
+
 The Ralph-loop harness that drives Claude Code through the implementation of
 the [F13 Configurator](https://github.com/revolutionaryPhoton/f13-configurator)
 — a setup wizard for F13 deployments with both a shell and a desktop-GUI

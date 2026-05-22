@@ -19,3 +19,7 @@ f13-configurator-design/
 # OS noise
 .DS_Store
 Thumbs.db
+
+# Local-only reference of intended branch-protection settings; UI
+# is the source of truth, this file is a private snapshot
+docs/BRANCH_PROTECTION.md
