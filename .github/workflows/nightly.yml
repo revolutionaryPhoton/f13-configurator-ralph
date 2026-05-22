@@ -1,0 +1,29 @@
+name: Nightly shellcheck
+
+# Re-runs shellcheck on a schedule (when activated) and on demand.
+# Catches drift in apt's shellcheck version that could surface new
+# warnings before a PR introduces them.
+#
+# Currently activatable via workflow_dispatch only; the scheduled
+# trigger is intentionally commented out. Uncomment the `schedule:`
+# block when the maintainer is ready to receive nightly noise.
+
+on:
+  workflow_dispatch:
+  # schedule:
+  #   - cron: '0 5 * * *'  # 05:00 UTC daily
+
+jobs:
+  shellcheck:
+    name: shellcheck (Linux)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - name: shellcheck -S warning ralph*.sh
+        run: shellcheck -S warning --exclude=SC2034,SC2207 ralph*.sh

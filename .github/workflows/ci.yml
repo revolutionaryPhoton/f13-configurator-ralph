@@ -1,0 +1,37 @@
+name: CI
+
+# Lints the harness scripts. Runs on every PR and on push to main.
+#
+# Cheap to run (just shellcheck), so the paths filter is permissive:
+# any change touching shell, workflows, or docs that affect tooling
+# behavior triggers it.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**/*.sh"
+      - ".github/workflows/**"
+  pull_request:
+    paths:
+      - "**/*.sh"
+      - ".github/workflows/**"
+
+jobs:
+  shellcheck:
+    name: shellcheck (Linux)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      # Excluded warnings (intentionally tolerated for now):
+      # - SC2034: unused color variables (kept for symmetry / future use)
+      # - SC2207: array splitting in ralph-dashboard.sh top-5 sort
+      #   (would require a refactor; behavior is currently correct)
+      - name: shellcheck -S warning ralph*.sh
+        run: shellcheck -S warning --exclude=SC2034,SC2207 ralph*.sh
