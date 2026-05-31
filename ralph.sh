@@ -67,9 +67,15 @@ if ! git -C "$WORKDIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   echo -e "${GREEN}Initialized git repo in $WORKDIR/${NC}"
 fi
 
-# ── Ensure CLAUDE.md exists in working directory ──
-if [ ! -f "$WORKDIR/CLAUDE.md" ]; then
-  cat > "$WORKDIR/CLAUDE.md" << 'CLAUDEMD'
+# ── Ensure LOOP_CONTEXT.md exists in working directory ──
+#
+# Note: the configurator's CLAUDE.md (tracked, thin pointer to
+# AGENTS.md) is the entry point Claude Code auto-loads. This file
+# carries the per-iteration loop state — current story, scope
+# fences, backpressure reminders — that CLAUDE.md and AGENTS.md
+# reference but don't include themselves.
+if [ ! -f "$WORKDIR/LOOP_CONTEXT.md" ]; then
+  cat > "$WORKDIR/LOOP_CONTEXT.md" << 'CLAUDEMD'
 # F13 Shell Configurator -- Claude Code Instructions
 
 Read /PRD.md for all rules. Key points:
@@ -149,7 +155,7 @@ with ONE PR at the end. Do NOT open per-story PRs.
   `npm run tauri build`, or any Tauri WebDriver E2E inside the loop.
   The loop is headless; those commands hang waiting for a window.
 CLAUDEMD
-  echo -e "${GREEN}Created $WORKDIR/CLAUDE.md${NC}"
+  echo -e "${GREEN}Created $WORKDIR/LOOP_CONTEXT.md${NC}"
 fi
 
 if [ "$MODE" = "docker" ]; then
