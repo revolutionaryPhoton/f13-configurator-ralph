@@ -8,13 +8,16 @@ set -uo pipefail
 #   ./ralph.sh                          # defaults: PRD.md, 30 iterations, docker
 #   ./ralph.sh PRD.md 20                # custom PRD and iteration count
 #   ./ralph.sh PRD.md 30 local          # run locally (no Docker sandbox)
+#   ./ralph.sh PRD.md 30 sbx            # Docker Sandboxes microVM (Desktop 4.58+)
 #   ./ralph.sh --tmux                   # launch in tmux split (live feed + dashboard)
 #   ./ralph.sh --tmux PRD.md 20 docker  # tmux with custom args
 #   ./ralph.sh --build                  # (re)build the sandbox image and exit
+#   ./ralph.sh --sbx-check              # smoke-test the Docker Sandboxes setup
 #
 # Env knobs (see .env.example): RALPH_MAX_BUDGET_CENTS, RALPH_MAX_TURNS,
 # RALPH_PERMISSION_MODE, RALPH_IMAGE, RALPH_CLAUDE_CODE_VERSION,
-# RALPH_FIREWALL, RALPH_NET_ALLOW_EXTRA, RALPH_WORKDIR
+# RALPH_FIREWALL, RALPH_NET_ALLOW_EXTRA, RALPH_WORKDIR, RALPH_SBX_NAME,
+# RALPH_SBX_TEMPLATE
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKDIR="${RALPH_WORKDIR:-configurator_v1}"
@@ -42,6 +45,13 @@ fi
 BUILD_ONLY=false
 if [ "${1:-}" = "--build" ]; then
   BUILD_ONLY=true
+  shift
+fi
+
+# ── Sbx smoke-test mode: verify Docker Sandboxes setup and exit ──
+SBX_CHECK=false
+if [ "${1:-}" = "--sbx-check" ]; then
+  SBX_CHECK=true
   shift
 fi
 
@@ -76,8 +86,8 @@ RALPH_IMAGE="${RALPH_IMAGE:-f13-ralph:latest}"
 # ── Sanity checks ──
 [ -f "$PRD" ] || { echo -e "${RED}ERR: $PRD not found.${NC}"; exit 1; }
 case "$MODE" in
-  docker|local) ;;
-  *) echo -e "${RED}ERR: unknown mode '$MODE' (docker|local).${NC}"; exit 1 ;;
+  docker|local|sbx) ;;
+  *) echo -e "${RED}ERR: unknown mode '$MODE' (docker|local|sbx).${NC}"; exit 1 ;;
 esac
 
 # Absolute paths for container mounts
@@ -185,13 +195,20 @@ LOOPCTX
   echo -e "${GREEN}Created $WORKDIR/LOOP_CONTEXT.md${NC}"
 fi
 
-if [ "$MODE" = "docker" ]; then
-  command -v docker >/dev/null 2>&1 || { echo -e "${RED}ERR: Docker not found.${NC}"; exit 1; }
-  # --build needs no token — it only builds the image.
-  [ "$BUILD_ONLY" = true ] || [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] || { echo -e "${RED}ERR: CLAUDE_CODE_OAUTH_TOKEN not set.${NC}"; exit 1; }
-else
-  command -v claude >/dev/null 2>&1 || { echo -e "${RED}ERR: claude not found. Install: npm i -g @anthropic-ai/claude-code${NC}"; exit 1; }
-fi
+case "$MODE" in
+  docker)
+    command -v docker >/dev/null 2>&1 || { echo -e "${RED}ERR: Docker not found.${NC}"; exit 1; }
+    # --build / --sbx-check need no token — they never invoke claude with a prompt.
+    [ "$BUILD_ONLY" = true ] || [ "$SBX_CHECK" = true ] || [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] || { echo -e "${RED}ERR: CLAUDE_CODE_OAUTH_TOKEN not set.${NC}"; exit 1; }
+    ;;
+  sbx)
+    docker sandbox version >/dev/null 2>&1 || { echo -e "${RED}ERR: 'docker sandbox' CLI unavailable (needs Docker Desktop 4.58+).${NC}"; exit 1; }
+    [ "$SBX_CHECK" = true ] || [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] || { echo -e "${RED}ERR: CLAUDE_CODE_OAUTH_TOKEN not set.${NC}"; exit 1; }
+    ;;
+  local)
+    command -v claude >/dev/null 2>&1 || { echo -e "${RED}ERR: claude not found. Install: npm i -g @anthropic-ai/claude-code${NC}"; exit 1; }
+    ;;
+esac
 
 # Initialize progress file and log directory
 [ -f "$WORKDIR/$PROGRESS" ] || echo "# F13 Shell Configurator -- Progress" > "$WORKDIR/$PROGRESS"
@@ -467,6 +484,80 @@ ensure_docker_image() {
     || { echo -e "${RED}ERR: docker build failed.${NC}"; return 1; }
 }
 
+# ── Docker Sandboxes (MODE=sbx): microVM isolation, Desktop 4.58+ ──
+# The sandbox is created once and reused (fast iterations, persistent
+# cargo/npm caches); each `exec ... claude -p` is still a fresh
+# conversation, so fresh-context-per-iteration is preserved.
+# Reset with: docker sandbox rm "$SBX_NAME"
+SBX_NAME="${RALPH_SBX_NAME:-f13-ralph}"
+SBX_TEMPLATE="${RALPH_SBX_TEMPLATE:-f13-ralph-sbx:latest}"
+SBX_PRD_DIR="$SCRIPT_DIR/.ralph-sbx"  # gitignored one-file staging dir (ro in sandbox)
+
+ensure_sbx_sandbox() {
+  if ! docker image inspect "$SBX_TEMPLATE" >/dev/null 2>&1; then
+    echo -e "${CYAN}Building sbx template $SBX_TEMPLATE ...${NC}"
+    docker build -t "$SBX_TEMPLATE" \
+      -f "$SCRIPT_DIR/docker/sbx-template.Dockerfile" "$SCRIPT_DIR/docker" \
+      || { echo -e "${RED}ERR: sbx template build failed.${NC}"; return 1; }
+  fi
+  # Sandboxes mount host paths verbatim — stage PRD.md in a dedicated
+  # one-file dir so the harness repo itself is never exposed.
+  mkdir -p "$SBX_PRD_DIR"
+  cp "$PRD_ABS" "$SBX_PRD_DIR/PRD.md"
+  if ! docker sandbox ls 2>/dev/null | grep -q "$SBX_NAME"; then
+    echo -e "${CYAN}Creating sandbox $SBX_NAME (workspace: $WORKDIR_HOST) ...${NC}"
+    docker sandbox create -t "$SBX_TEMPLATE" --name "$SBX_NAME" claude \
+      "$WORKDIR_HOST" "$SBX_PRD_DIR:ro" \
+      || { echo -e "${RED}ERR: docker sandbox create failed.${NC}"; return 1; }
+    local proxy_args=(--policy deny
+      --allow-host api.anthropic.com --allow-host registry.npmjs.org
+      --allow-host crates.io --allow-host static.crates.io
+      --allow-host index.crates.io)
+    local extra
+    for extra in ${RALPH_NET_ALLOW_EXTRA:-}; do
+      proxy_args+=(--allow-host "$extra")
+    done
+    docker sandbox network proxy "$SBX_NAME" "${proxy_args[@]}" \
+      || { echo -e "${RED}ERR: sandbox proxy allowlist failed.${NC}"; return 1; }
+  fi
+}
+
+run_claude_sbx() {
+  local iter_prompt="${PROMPT//ITER_NUM/$1}"
+  # Workspaces mount at the host path, so /PRD.md does not exist in sbx
+  # mode — point the prompt at the staged copy instead.
+  iter_prompt="${iter_prompt///PRD.md/$SBX_PRD_DIR/PRD.md}"
+  # Token via --env-file (0600 tmpfile) so it never appears on argv.
+  local envf
+  envf="$(mktemp)"
+  chmod 600 "$envf"
+  printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\nCLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1\n' \
+    "${CLAUDE_CODE_OAUTH_TOKEN}" > "$envf"
+  docker sandbox exec --env-file "$envf" -w "$WORKDIR_HOST" "$SBX_NAME" \
+    stdbuf -oL claude "${CLAUDE_FLAGS[@]}" "$iter_prompt"
+  rm -f "$envf"
+}
+
+sbx_check() {
+  echo -e "${CYAN}sbx check: docker sandbox CLI ...${NC}"
+  docker sandbox version || { echo -e "${RED}docker sandbox CLI unavailable.${NC}"; return 1; }
+  ensure_sbx_sandbox || return 1
+  echo -e "${CYAN}sbx check: claude + toolchain inside sandbox ...${NC}"
+  docker sandbox exec "$SBX_NAME" claude --version || return 1
+  docker sandbox exec "$SBX_NAME" bash -c \
+    'shellcheck --version >/dev/null && bats --version >/dev/null && cargo --version >/dev/null && echo "toolchain OK"' \
+    || return 1
+  echo -e "${CYAN}sbx check: egress proxy ...${NC}"
+  # -f matters: the sandbox proxy blocks by answering HTTP 403, which
+  # plain curl -s would report as success.
+  if docker sandbox exec "$SBX_NAME" curl -sf -m 5 https://example.com >/dev/null 2>&1; then
+    echo -e "${YELLOW}WARN: proxy allowlist not enforced (example.com reachable)${NC}"
+  else
+    echo -e "${GREEN}egress blocked outside allowlist${NC}"
+  fi
+  echo -e "${GREEN}sbx check OK${NC}"
+}
+
 run_claude_local() {
   local iter_prompt="${PROMPT//ITER_NUM/$1}"
   (cd "$WORKDIR" && claude "${CLAUDE_FLAGS[@]}" "$iter_prompt")
@@ -617,13 +708,19 @@ show_dashboard() {
   echo ""
 }
 
-# ── Sandbox image (build-only mode exits here) ──
+# ── Sandbox image (build-only / sbx-check modes exit here) ──
 if [ "$BUILD_ONLY" = true ]; then
   ensure_docker_image --force
   exit $?
 fi
+if [ "$SBX_CHECK" = true ]; then
+  sbx_check
+  exit $?
+fi
 if [ "$MODE" = "docker" ]; then
   ensure_docker_image || exit 1
+elif [ "$MODE" = "sbx" ]; then
+  ensure_sbx_sandbox || exit 1
 fi
 
 # ── Banner ──
@@ -637,6 +734,8 @@ echo -e "${CYAN} Mode:           $MODE${NC}"
 if [ "$MODE" = "docker" ]; then
   echo -e "${CYAN} Image:          $RALPH_IMAGE${NC}"
   echo -e "${CYAN} Firewall:       ${RALPH_FIREWALL:-on}${NC}"
+elif [ "$MODE" = "sbx" ]; then
+  echo -e "${CYAN} Sandbox:        $SBX_NAME (template: $SBX_TEMPLATE)${NC}"
 fi
 budget_disp="unlimited"
 [ "${RALPH_MAX_BUDGET_CENTS:-0}" -gt 0 ] 2>/dev/null && budget_disp="$(fmt_cost "$RALPH_MAX_BUDGET_CENTS")"
@@ -702,6 +801,8 @@ while [ "$ITERATION" -lt "$MAX_ITERATIONS" ]; do
 
   if [ "$MODE" = "docker" ]; then
     run_claude_docker "$ITERATION" 2>&1 | tee "$logfile" | USAGE_FILE="$usagefile" "$LIVE_FILTER"
+  elif [ "$MODE" = "sbx" ]; then
+    run_claude_sbx "$ITERATION" 2>&1 | tee "$logfile" | USAGE_FILE="$usagefile" "$LIVE_FILTER"
   else
     run_claude_local "$ITERATION" 2>&1 | tee "$logfile" | USAGE_FILE="$usagefile" "$LIVE_FILTER"
   fi
