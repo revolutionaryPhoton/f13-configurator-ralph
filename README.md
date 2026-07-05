@@ -46,7 +46,7 @@ backpressure checks, commit, repeat.
 | `ralph.sh` | Main loop. Reads `PRD.md`, runs Claude Code in Docker (or locally), captures per-iteration logs and usage, commits to the sibling configurator repo. |
 | `ralph-dashboard.sh` | Live cost / progress dashboard (`tmux` split or one-shot). Reads `ralph-logs/*.json` and the configurator's `PROGRESS.md`. |
 | `ralph-live.sh` | Stream-json → human filter. Pipes Claude's verbose output into a tidy live feed and writes a usage summary at the end. |
-| `PRD.md` | The product requirements document for the configurator. Story list (`S00`…`S16`) drives one iteration each. |
+| `PRD.md` | The product requirements document for the configurator. Story list (`S00`…`S115`, grows per phase) drives one iteration each. |
 | `.env.example` | Template for `.env.local` (Discord webhook URL). |
 
 ## How it expects the disk to be laid out

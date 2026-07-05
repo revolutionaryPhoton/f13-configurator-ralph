@@ -69,13 +69,13 @@ fi
 
 # ── Ensure LOOP_CONTEXT.md exists in working directory ──
 #
-# Note: the configurator's CLAUDE.md (tracked, thin pointer to
-# AGENTS.md) is the entry point Claude Code auto-loads. This file
-# carries the per-iteration loop state — current story, scope
-# fences, backpressure reminders — that CLAUDE.md and AGENTS.md
-# reference but don't include themselves.
+# LOOP_CONTEXT.md carries the per-iteration loop state — current
+# story, scope fences, backpressure reminders. The configurator's
+# CLAUDE.md (tracked, thin pointer to AGENTS.md) is the entry point
+# Claude Code auto-loads; both it and AGENTS.md reference
+# LOOP_CONTEXT.md but don't include the loop state themselves.
 if [ ! -f "$WORKDIR/LOOP_CONTEXT.md" ]; then
-  cat > "$WORKDIR/LOOP_CONTEXT.md" << 'CLAUDEMD'
+  cat > "$WORKDIR/LOOP_CONTEXT.md" << 'LOOPCTX'
 # F13 Shell Configurator -- Claude Code Instructions
 
 Read /PRD.md for all rules. Key points:
@@ -154,7 +154,7 @@ with ONE PR at the end. Do NOT open per-story PRs.
   🚫 NEVER run `npm run tauri dev`, `tauri dev`, `cargo run`,
   `npm run tauri build`, or any Tauri WebDriver E2E inside the loop.
   The loop is headless; those commands hang waiting for a window.
-CLAUDEMD
+LOOPCTX
   echo -e "${GREEN}Created $WORKDIR/LOOP_CONTEXT.md${NC}"
 fi
 
