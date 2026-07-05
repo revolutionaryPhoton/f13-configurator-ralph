@@ -285,13 +285,11 @@ EOJSON
 discord_complete() {
   [ -z "${RALPH_DISCORD_WEBHOOK:-}" ] && return
 
-  local t_cost=0 t_iterations=0
+  local t_cost t_iterations=0
+  t_cost=$(total_cost_cents)
   for uf in "$WORKDIR/$LOGDIR"/usage-*.json; do
     [ -f "$uf" ] || continue
     t_iterations=$(( t_iterations + 1 ))
-    local c
-    c=$(grep -o '"cost_cents": *[0-9]*' "$uf" 2>/dev/null | grep -o '[0-9]*' || true)
-    [ -n "$c" ] && t_cost=$(( t_cost + c ))
   done
 
   local s_done commits src_f test_f
@@ -367,9 +365,68 @@ stories_total() {
   if [ "$t" -gt 0 ]; then echo "$t"; else echo "$STORIES_TOTAL_FALLBACK"; fi
 }
 
+# Per-invocation claude flags shared by all modes. Defaults reproduce the
+# historical behavior plus a --max-turns runaway guard.
+#   RALPH_MAX_TURNS        per-iteration turn cap (default 200; 0 = unlimited)
+#   RALPH_PERMISSION_MODE  bypass (default, --dangerously-skip-permissions;
+#                          safe only inside the sandbox) or a claude
+#                          --permission-mode value such as acceptEdits
+CLAUDE_FLAGS=()
+build_claude_flags() {
+  CLAUDE_FLAGS=(--verbose --output-format stream-json)
+  local turns="${RALPH_MAX_TURNS:-200}"
+  if [ "$turns" != "0" ]; then
+    CLAUDE_FLAGS+=(--max-turns "$turns")
+  fi
+  case "${RALPH_PERMISSION_MODE:-bypass}" in
+    bypass) CLAUDE_FLAGS+=(--dangerously-skip-permissions) ;;
+    *)      CLAUDE_FLAGS+=(--permission-mode "$RALPH_PERMISSION_MODE") ;;
+  esac
+  CLAUDE_FLAGS+=(-p)
+}
+
+# Cumulative cost in cents across every usage-*.json in the log dir
+# (lifetime of the log dir, i.e. across runs).
+total_cost_cents() {
+  local t=0 c uf
+  for uf in "$WORKDIR/$LOGDIR"/usage-*.json; do
+    [ -f "$uf" ] || continue
+    c=$(grep -o '"cost_cents": *[0-9]*' "$uf" 2>/dev/null | grep -o '[0-9]*' || true)
+    [ -n "$c" ] && t=$(( t + c ))
+  done
+  echo "$t"
+}
+
+# Budget kill-switch: RALPH_MAX_BUDGET_CENTS > 0 caps cumulative spend.
+# Returns 1 (abort the loop) once spent >= cap.
+check_budget() {
+  local cap="${RALPH_MAX_BUDGET_CENTS:-0}"
+  [ "$cap" -gt 0 ] 2>/dev/null || return 0
+  local spent
+  spent=$(total_cost_cents)
+  [ "$spent" -lt "$cap" ] && return 0
+  echo ""
+  echo -e "${RED}============================================${NC}"
+  echo -e "${RED} BUDGET CAP HIT: $(fmt_cost "$spent") spent >= cap $(fmt_cost "$cap")${NC}"
+  echo -e "${RED} Aborting loop (RALPH_MAX_BUDGET_CENTS=$cap)${NC}"
+  echo -e "${RED}============================================${NC}"
+  discord_notify "$(cat <<EOJSON
+{
+  "embeds": [{
+    "title": "Ralph Loop ABORTED — budget cap",
+    "description": "Spent $(fmt_cost "$spent") of cap $(fmt_cost "$cap") (RALPH_MAX_BUDGET_CENTS=$cap)",
+    "color": 15548997,
+    "footer": {"text": "Ralph Loop - $WORKDIR"}
+  }]
+}
+EOJSON
+)"
+  return 1
+}
+
 run_claude_local() {
   local iter_prompt="${PROMPT//ITER_NUM/$1}"
-  (cd "$WORKDIR" && claude --dangerously-skip-permissions --verbose --output-format stream-json -p "$iter_prompt")
+  (cd "$WORKDIR" && claude "${CLAUDE_FLAGS[@]}" "$iter_prompt")
 }
 
 run_claude_docker() {
@@ -391,6 +448,7 @@ run_claude_docker() {
     -e HOST_UID="$host_uid" \
     -e HOST_GID="$host_gid" \
     -e RALPH_WORKDIR="${workdir_name}" \
+    -e CLAUDE_FLAGS_STR="${CLAUDE_FLAGS[*]}" \
     --network host \
     node:24-bookworm-slim \
     bash -c '
@@ -434,7 +492,7 @@ run_claude_docker() {
         cp -r /root/.rustup "$RALPH_HOME/.rustup" 2>/dev/null || true
         chown -R "$HOST_UID:$HOST_GID" "$RALPH_HOME/.cargo" "$RALPH_HOME/.rustup" 2>/dev/null || true
       fi
-      cat /tmp/prompt.txt | su "$RALPH_USER" -c "PATH=\$HOME/.cargo/bin:\$PATH stdbuf -oL claude --dangerously-skip-permissions --verbose --output-format stream-json -p"
+      cat /tmp/prompt.txt | su "$RALPH_USER" -c "PATH=\$HOME/.cargo/bin:\$PATH stdbuf -oL claude $CLAUDE_FLAGS_STR"
     '
   rm -f "$prompt_file"
 }
@@ -603,7 +661,11 @@ if grep -q '## Pending Stories' "$WORKDIR/$PROGRESS" 2>/dev/null; then
 fi
 
 # ── Main loop ──
+build_claude_flags
+check_budget || exit 2
+
 while [ "$ITERATION" -lt "$MAX_ITERATIONS" ]; do
+  check_budget || exit 2
   ITERATION=$((ITERATION + 1))
   start_time=$(date +%s)
   commit_before=$(git -C "$WORKDIR" rev-parse HEAD 2>/dev/null || echo "")
