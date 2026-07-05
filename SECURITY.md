@@ -104,21 +104,31 @@ What this means for users / contributors of either repo:
 ## 🫧 Docker Sandboxes mode (`MODE=sbx`)
 
 - `./ralph.sh PRD.md 30 sbx` runs each iteration inside a **Docker
-  Sandboxes microVM** (Docker Desktop 4.58+) — a hard hypervisor
-  boundary instead of a shared-kernel container.
-- Egress is locked by the sandbox's MITM proxy
-  (`docker sandbox network proxy --policy deny` + the same allowlist);
-  blocked requests receive HTTP 403.
+  Sandboxes microVM** — a hard hypervisor boundary instead of a
+  shared-kernel container. Requires the standalone `sbx` CLI
+  (`brew trust docker/tap && brew install docker/tap/sbx`) and a
+  one-time `sbx login`; the old `docker sandbox` Desktop plugin was
+  removed by Docker in mid-2026.
+- Egress is locked by sbx network policies: the harness initializes
+  the one-time **global policy as `deny-all`** (this applies to ALL
+  your sbx sandboxes; agent kits add their own per-sandbox allows) and
+  grants this sandbox the same allowlist as docker mode
+  (`sbx policy allow network --sandbox f13-ralph ...`). Blocked
+  requests receive HTTP 403.
 - The sandbox mounts only `configurator_v1/` (rw, at its host path) and
-  a staged copy of `PRD.md` in `.ralph-sbx/` (ro). Verified: no
-  `~/.claude` credentials are copied in, and the template's github
-  credential helper has no token to serve — pushes fail by design,
-  same as docker mode.
+  a staged copy of `PRD.md` in `.ralph-sbx/` (ro). Verified on the old
+  plugin runtime: no `~/.claude` credentials are copied in, and the
+  template's github credential helper has no token to serve — pushes
+  fail by design, same as docker mode. Re-verify with `--sbx-check`
+  after sbx CLI updates.
+- The template image is built on the host daemon and loaded into the
+  sandbox runtime's own image store via `sbx template load`.
 - The sandbox is created once and reused (persistent npm/cargo caches);
   each iteration is still a fresh claude conversation. Reset with
-  `docker sandbox rm f13-ralph`.
+  `sbx rm f13-ralph`.
 - `./ralph.sh --sbx-check` smoke-tests the whole setup without any API
-  call (CLI present, template builds, toolchain inside, proxy blocks).
+  call (CLI + auth present, template builds and loads, toolchain
+  inside, policy blocks example.com but allows api.anthropic.com).
 
 ## 💸 Cost & budget
 

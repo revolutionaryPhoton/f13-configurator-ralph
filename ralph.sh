@@ -202,7 +202,7 @@ case "$MODE" in
     [ "$BUILD_ONLY" = true ] || [ "$SBX_CHECK" = true ] || [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] || { echo -e "${RED}ERR: CLAUDE_CODE_OAUTH_TOKEN not set.${NC}"; exit 1; }
     ;;
   sbx)
-    docker sandbox version >/dev/null 2>&1 || { echo -e "${RED}ERR: 'docker sandbox' CLI unavailable (needs Docker Desktop 4.58+).${NC}"; exit 1; }
+    command -v sbx >/dev/null 2>&1 || { echo -e "${RED}ERR: sbx CLI not found. Install: brew trust docker/tap && brew install docker/tap/sbx${NC}"; exit 1; }
     [ "$SBX_CHECK" = true ] || [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] || { echo -e "${RED}ERR: CLAUDE_CODE_OAUTH_TOKEN not set.${NC}"; exit 1; }
     ;;
   local)
@@ -484,41 +484,61 @@ ensure_docker_image() {
     || { echo -e "${RED}ERR: docker build failed.${NC}"; return 1; }
 }
 
-# ── Docker Sandboxes (MODE=sbx): microVM isolation, Desktop 4.58+ ──
+# ── Docker Sandboxes (MODE=sbx): microVM isolation via the sbx CLI ──
+# Install: brew trust docker/tap && brew install docker/tap/sbx
+# (the old "docker sandbox" plugin was removed by Docker in 2026-06).
+# One-time: sbx login (Docker sign-in).
 # The sandbox is created once and reused (fast iterations, persistent
 # cargo/npm caches); each `exec ... claude -p` is still a fresh
 # conversation, so fresh-context-per-iteration is preserved.
-# Reset with: docker sandbox rm "$SBX_NAME"
+# Reset with: sbx rm "$SBX_NAME"
 SBX_NAME="${RALPH_SBX_NAME:-f13-ralph}"
 SBX_TEMPLATE="${RALPH_SBX_TEMPLATE:-f13-ralph-sbx:latest}"
 SBX_PRD_DIR="$SCRIPT_DIR/.ralph-sbx"  # gitignored one-file staging dir (ro in sandbox)
+SBX_ALLOW_HOSTS="api.anthropic.com,registry.npmjs.org,crates.io,static.crates.io,index.crates.io"
 
 ensure_sbx_sandbox() {
-  if ! docker image inspect "$SBX_TEMPLATE" >/dev/null 2>&1; then
-    echo -e "${CYAN}Building sbx template $SBX_TEMPLATE ...${NC}"
-    docker build -t "$SBX_TEMPLATE" \
-      -f "$SCRIPT_DIR/docker/sbx-template.Dockerfile" "$SCRIPT_DIR/docker" \
-      || { echo -e "${RED}ERR: sbx template build failed.${NC}"; return 1; }
+  # sbx runs its own image store inside the VM — build on the host
+  # daemon, then load the tar into the sandbox runtime when missing.
+  if ! sbx template ls 2>/dev/null | grep -q "f13-ralph-sbx"; then
+    if ! docker image inspect "$SBX_TEMPLATE" >/dev/null 2>&1; then
+      echo -e "${CYAN}Building sbx template $SBX_TEMPLATE ...${NC}"
+      docker build -t "$SBX_TEMPLATE" \
+        -f "$SCRIPT_DIR/docker/sbx-template.Dockerfile" "$SCRIPT_DIR/docker" \
+        || { echo -e "${RED}ERR: sbx template build failed.${NC}"; return 1; }
+    fi
+    echo -e "${CYAN}Loading template into the sandbox runtime ...${NC}"
+    local tarf
+    tarf="$(mktemp -u).tar"
+    docker save -o "$tarf" "$SBX_TEMPLATE" \
+      && sbx template load "$tarf" \
+      || { rm -f "$tarf"; echo -e "${RED}ERR: sbx template load failed.${NC}"; return 1; }
+    rm -f "$tarf"
+  fi
+  # Global network policy must be initialized before the first sandbox
+  # start. deny-all matches this harness's posture: nothing leaves any
+  # sandbox unless allowed per sandbox (agent kits add their own rules).
+  if ! sbx policy ls >/dev/null 2>&1; then
+    echo -e "${CYAN}Initializing global sbx network policy (deny-all) ...${NC}"
+    sbx policy init deny-all \
+      || { echo -e "${RED}ERR: sbx policy init failed.${NC}"; return 1; }
   fi
   # Sandboxes mount host paths verbatim — stage PRD.md in a dedicated
   # one-file dir so the harness repo itself is never exposed.
   mkdir -p "$SBX_PRD_DIR"
   cp "$PRD_ABS" "$SBX_PRD_DIR/PRD.md"
-  if ! docker sandbox ls 2>/dev/null | grep -q "$SBX_NAME"; then
+  if ! sbx ls 2>/dev/null | grep -q "$SBX_NAME"; then
     echo -e "${CYAN}Creating sandbox $SBX_NAME (workspace: $WORKDIR_HOST) ...${NC}"
-    docker sandbox create -t "$SBX_TEMPLATE" --name "$SBX_NAME" claude \
+    sbx create -t "$SBX_TEMPLATE" --name "$SBX_NAME" -q claude \
       "$WORKDIR_HOST" "$SBX_PRD_DIR:ro" \
-      || { echo -e "${RED}ERR: docker sandbox create failed.${NC}"; return 1; }
-    local proxy_args=(--policy deny
-      --allow-host api.anthropic.com --allow-host registry.npmjs.org
-      --allow-host crates.io --allow-host static.crates.io
-      --allow-host index.crates.io)
+      || { echo -e "${RED}ERR: sbx create failed.${NC}"; return 1; }
+    local allow="$SBX_ALLOW_HOSTS"
     local extra
     for extra in ${RALPH_NET_ALLOW_EXTRA:-}; do
-      proxy_args+=(--allow-host "$extra")
+      allow="$allow,$extra"
     done
-    docker sandbox network proxy "$SBX_NAME" "${proxy_args[@]}" \
-      || { echo -e "${RED}ERR: sandbox proxy allowlist failed.${NC}"; return 1; }
+    sbx policy allow network --sandbox "$SBX_NAME" "$allow" \
+      || { echo -e "${RED}ERR: sbx allowlist failed.${NC}"; return 1; }
   fi
 }
 
@@ -533,27 +553,36 @@ run_claude_sbx() {
   chmod 600 "$envf"
   printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\nCLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1\n' \
     "${CLAUDE_CODE_OAUTH_TOKEN}" > "$envf"
-  docker sandbox exec --env-file "$envf" -w "$WORKDIR_HOST" "$SBX_NAME" \
+  sbx exec --env-file "$envf" -w "$WORKDIR_HOST" "$SBX_NAME" \
     stdbuf -oL claude "${CLAUDE_FLAGS[@]}" "$iter_prompt"
   rm -f "$envf"
 }
 
 sbx_check() {
-  echo -e "${CYAN}sbx check: docker sandbox CLI ...${NC}"
-  docker sandbox version || { echo -e "${RED}docker sandbox CLI unavailable.${NC}"; return 1; }
+  echo -e "${CYAN}sbx check: sbx CLI ...${NC}"
+  command -v sbx >/dev/null 2>&1 \
+    || { echo -e "${RED}sbx CLI missing. Install: brew trust docker/tap && brew install docker/tap/sbx${NC}"; return 1; }
+  sbx version || return 1
+  sbx ls >/dev/null 2>&1 \
+    || { echo -e "${RED}sbx not authenticated. Run: sbx login${NC}"; return 1; }
   ensure_sbx_sandbox || return 1
   echo -e "${CYAN}sbx check: claude + toolchain inside sandbox ...${NC}"
-  docker sandbox exec "$SBX_NAME" claude --version || return 1
-  docker sandbox exec "$SBX_NAME" bash -c \
+  sbx exec "$SBX_NAME" claude --version || return 1
+  sbx exec "$SBX_NAME" bash -c \
     'shellcheck --version >/dev/null && bats --version >/dev/null && cargo --version >/dev/null && echo "toolchain OK"' \
     || return 1
-  echo -e "${CYAN}sbx check: egress proxy ...${NC}"
-  # -f matters: the sandbox proxy blocks by answering HTTP 403, which
-  # plain curl -s would report as success.
-  if docker sandbox exec "$SBX_NAME" curl -sf -m 5 https://example.com >/dev/null 2>&1; then
-    echo -e "${YELLOW}WARN: proxy allowlist not enforced (example.com reachable)${NC}"
+  echo -e "${CYAN}sbx check: egress policy ...${NC}"
+  # -f matters: the sandbox blocks by answering HTTP 403, which plain
+  # curl -s would report as success.
+  if sbx exec "$SBX_NAME" curl -sf -m 5 https://example.com >/dev/null 2>&1; then
+    echo -e "${YELLOW}WARN: network policy not enforced (example.com reachable)${NC}"
   else
     echo -e "${GREEN}egress blocked outside allowlist${NC}"
+  fi
+  if sbx exec "$SBX_NAME" curl -s -m 10 -o /dev/null https://api.anthropic.com; then
+    echo -e "${GREEN}api.anthropic.com reachable${NC}"
+  else
+    echo -e "${YELLOW}WARN: api.anthropic.com NOT reachable — check sbx policy${NC}"
   fi
   echo -e "${GREEN}sbx check OK${NC}"
 }
