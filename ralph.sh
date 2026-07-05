@@ -297,7 +297,7 @@ discord_complete() {
   local s_done commits src_f test_f
   s_done=$(stories_done)
   commits=$(git -C "$WORKDIR" rev-list --count HEAD 2>/dev/null || echo 0)
-  src_f=$(find "$WORKDIR/bin" "$WORKDIR/lib" -type f -name "*.sh" -o -type f -perm -u+x 2>/dev/null | wc -l | tr -d ' ')
+  src_f=$(find "$WORKDIR/bin" "$WORKDIR/lib" -type f \( -name "*.sh" -o -perm -u+x \) 2>/dev/null | wc -l | tr -d ' ')
   test_f=$(find "$WORKDIR/tests" -type f -name "*.bats" 2>/dev/null | wc -l | tr -d ' ')
 
   local color=5763719  # green
@@ -497,7 +497,7 @@ show_dashboard() {
   s_total=$(stories_total)
   s_pending=$(count_stories "Pending Stories" open)
   commits=$(git -C "$WORKDIR" rev-list --count HEAD 2>/dev/null || echo 0)
-  src_f=$(find "$WORKDIR/bin" "$WORKDIR/lib" -type f -name "*.sh" 2>/dev/null | wc -l | tr -d ' ')
+  src_f=$(find "$WORKDIR/bin" "$WORKDIR/lib" -type f \( -name "*.sh" -o -perm -u+x \) 2>/dev/null | wc -l | tr -d ' ')
   test_f=$(find "$WORKDIR/tests" -type f -name "*.bats" 2>/dev/null | wc -l | tr -d ' ')
 
   local c_in=$(( t_in * P_IN / 1000000 ))

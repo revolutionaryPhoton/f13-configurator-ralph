@@ -133,7 +133,7 @@ stories_pending=$(count_stories "Pending Stories" open)
 commit_count=$(git -C "$WORKDIR" rev-list --count HEAD 2>/dev/null || echo 0)
 first_commit=$(git -C "$WORKDIR" log --reverse --format='%ci' 2>/dev/null | head -1)
 last_commit=$(git -C "$WORKDIR" log -1 --format='%ci' 2>/dev/null)
-src_files=$(find "$WORKDIR/bin" "$WORKDIR/lib" -type f -name "*.sh" 2>/dev/null | wc -l | tr -d ' ')
+src_files=$(find "$WORKDIR/bin" "$WORKDIR/lib" -type f \( -name "*.sh" -o -perm -u+x \) 2>/dev/null | wc -l | tr -d ' ')
 test_files=$(find "$WORKDIR/tests" -type f -name "*.bats" 2>/dev/null | wc -l | tr -d ' ')
 
 cost_input=$(( total_input * P_IN / 1000000 ))
