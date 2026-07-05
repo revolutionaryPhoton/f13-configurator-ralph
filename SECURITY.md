@@ -47,10 +47,14 @@ What this means for users / contributors of either repo:
   ```bash
   export CLAUDE_CODE_OAUTH_TOKEN="sk-ant-oat01-..."
   ```
-- `ralph.sh` forwards it into the docker container via `-e`. It is not
+- `ralph.sh` forwards it into the docker container via a value-less
+  `-e CLAUDE_CODE_OAUTH_TOKEN` (so it never appears on the script's own
+  argv), and into sbx sandboxes via a `0600` temp env-file. It is not
   written to disk inside the container, but it IS visible via
   `docker inspect` while the container runs. Don't share the host while
   a loop is in flight.
+- The token is the ONLY credential the sandbox sees — `~/.claude` is
+  not mounted.
 - To rotate: `claude setup-token` again, then re-export. The previous
   token can be revoked from your Anthropic account settings.
 
@@ -66,21 +70,55 @@ What this means for users / contributors of either repo:
 
 ## 🐳 Docker sandbox & `--dangerously-skip-permissions`
 
-- The loop runs Claude Code with `--dangerously-skip-permissions` inside
-  a Docker container. Inside that container, Claude can edit any file
-  and run any command without prompting. That's the point — but it
-  means the sandbox boundary matters.
+- The loop runs Claude Code with `--dangerously-skip-permissions`
+  (configurable via `RALPH_PERMISSION_MODE`) inside a Docker container.
+  Inside that container, Claude can edit any file and run any command
+  without prompting. That's the point — but it means the sandbox
+  boundary matters.
+- **Prebuilt pinned image** (`docker/ralph.Dockerfile`, built via
+  `./ralph.sh --build`): base pinned by digest, `claude-code` pinned by
+  version, all toolchain deps baked. No `apt-get`, no `curl | sh`, no
+  unpinned `npm install` at iteration time.
 - Mounts inside the sandbox (intentional, minimal):
-  - `$(pwd):/workspace` — the configurator project (so the loop can
-    edit code).
-  - `~/.claude:/home/node/.claude` (read-only via subsequent copy) —
-    skills + identity for the CLI.
+  - `configurator_v1/` at `/workspace` (rw) — the product repo the
+    loop edits.
+  - `PRD.md` at `/PRD.md` (ro) and the iteration prompt (ro).
+  - **Nothing else.** The harness repo, `.env.local` (webhook) and the
+    harness `.git` are not visible; `~/.claude` is NOT mounted.
+- **Egress allowlist**: the image entrypoint raises a default-DROP
+  iptables/ipset firewall as root (allowing only `api.anthropic.com`,
+  npm and crates.io — needed by the product's backpressure checks —
+  plus `RALPH_NET_ALLOW_EXTRA`), then drops to the non-root `ralph`
+  user via `setpriv`. With no capabilities left, the agent cannot undo
+  the rules. `RALPH_FIREWALL=off` disables it if needed.
+- The container runs with `--security-opt no-new-privileges`;
+  `NET_ADMIN`/`NET_RAW` are granted only so the entrypoint can raise
+  the firewall before the privilege drop.
 - The sandbox does NOT mount: your shell history, ssh keys, gh
   credentials, browser profiles, or `~`. Do **not** extend the mount
   list without a clear security reason.
 - Running `docker` itself requires access to the Docker socket
   (`/var/run/docker.sock`), which on most setups is equivalent to root
   on the host. Only run this loop on a machine you fully control.
+
+## 🫧 Docker Sandboxes mode (`MODE=sbx`)
+
+- `./ralph.sh PRD.md 30 sbx` runs each iteration inside a **Docker
+  Sandboxes microVM** (Docker Desktop 4.58+) — a hard hypervisor
+  boundary instead of a shared-kernel container.
+- Egress is locked by the sandbox's MITM proxy
+  (`docker sandbox network proxy --policy deny` + the same allowlist);
+  blocked requests receive HTTP 403.
+- The sandbox mounts only `configurator_v1/` (rw, at its host path) and
+  a staged copy of `PRD.md` in `.ralph-sbx/` (ro). Verified: no
+  `~/.claude` credentials are copied in, and the template's github
+  credential helper has no token to serve — pushes fail by design,
+  same as docker mode.
+- The sandbox is created once and reused (persistent npm/cargo caches);
+  each iteration is still a fresh claude conversation. Reset with
+  `docker sandbox rm f13-ralph`.
+- `./ralph.sh --sbx-check` smoke-tests the whole setup without any API
+  call (CLI present, template builds, toolchain inside, proxy blocks).
 
 ## 💸 Cost & budget
 
@@ -89,14 +127,21 @@ What this means for users / contributors of either repo:
   ~$0.50–$5 depending on story complexity.
 - A full PRD run (S00–S16) cost roughly $30–$45 at Opus pricing during
   development. Set `MAX_ITERATIONS` in `ralph.sh` to cap exposure.
+- **Hard budget cap**: set `RALPH_MAX_BUDGET_CENTS` (e.g. `5000` =
+  $50) and the loop aborts with exit 2 — before invoking Claude — once
+  cumulative spend across `ralph-logs/usage-*.json` reaches the cap.
+  The cap is lifetime-of-the-logdir, not per-run.
+- **Runaway guard**: each iteration runs with `--max-turns` (default
+  200, `RALPH_MAX_TURNS` to change, 0 to disable).
 - The dashboard projects estimated remaining cost based on per-story
   averages — check it before kicking off a long run.
 
 ## 🌳 Git / commit safety
 
 - The loop commits inside the sibling configurator repo with the
-  identity `David Moch <david.moch@gmail.com>` (set inside the docker
-  container). Change that in `ralph.sh` if you fork.
+  identity `David Moch <david.moch@gmail.com>` (baked into the sandbox
+  image — `ARG GIT_USER_NAME` / `GIT_USER_EMAIL` in
+  `docker/ralph.Dockerfile`). Override at build time if you fork.
 - The loop **never pushes**. Pushing is your responsibility — review
   each iteration's diff before `git push`.
 - The docker container has no GitHub credentials; push attempts inside

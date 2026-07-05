@@ -43,11 +43,27 @@ backpressure checks, commit, repeat.
 
 | File | Purpose |
 |---|---|
-| `ralph.sh` | Main loop. Reads `PRD.md`, runs Claude Code in Docker (or locally), captures per-iteration logs and usage, commits to the sibling configurator repo. |
+| `ralph.sh` | Main loop. Reads `PRD.md`, runs Claude Code in a sandbox (see modes below), captures per-iteration logs and usage, commits to the sibling configurator repo. |
 | `ralph-dashboard.sh` | Live cost / progress dashboard (`tmux` split or one-shot). Reads `ralph-logs/*.json` and the configurator's `PROGRESS.md`. |
 | `ralph-live.sh` | Stream-json → human filter. Pipes Claude's verbose output into a tidy live feed and writes a usage summary at the end. |
+| `docker/` | Sandbox pieces: `ralph.Dockerfile` (prebuilt pinned image), `init-firewall.sh` + `ralph-entrypoint.sh` (egress allowlist, privilege drop), `sbx-template.Dockerfile` (Docker Sandboxes template). |
 | `PRD.md` | The product requirements document for the configurator. Story list (`S00`…`S115`, grows per phase) drives one iteration each. |
-| `.env.example` | Template for `.env.local` (Discord webhook URL). |
+| `.env.example` | Template for `.env.local` (Discord webhook + guardrail/sandbox knobs). |
+
+## Sandbox modes
+
+| Mode | Isolation | Notes |
+|---|---|---|
+| `docker` (default) | Hardened container: prebuilt pinned image, only the product repo + PRD (ro) mounted, no `~/.claude`, default-DROP egress allowlist, non-root agent | `./ralph.sh` — image auto-builds on first run (`./ralph.sh --build` to rebuild) |
+| `sbx` | **Docker Sandboxes microVM** (Docker Desktop 4.58+): hypervisor boundary, proxy-enforced egress allowlist | `./ralph.sh PRD.md 30 sbx` — smoke-test first with `./ralph.sh --sbx-check` |
+| `local` | None (host CLI) | `./ralph.sh PRD.md 30 local` — for sanity checks only |
+
+Guardrails in every mode: `--max-turns` per iteration (`RALPH_MAX_TURNS`,
+default 200), a cumulative budget kill-switch (`RALPH_MAX_BUDGET_CENTS` —
+the loop aborts before invoking Claude once spend reaches the cap), and a
+configurable permission mode (`RALPH_PERMISSION_MODE`, default `bypass`).
+See `.env.example` for all knobs and [SECURITY.md](SECURITY.md) for the
+full posture.
 
 ## How it expects the disk to be laid out
 
@@ -82,15 +98,18 @@ OAuth token from `claude setup-token`.
 export CLAUDE_CODE_OAUTH_TOKEN="sk-ant-oat01-..."
 ./ralph.sh                  # default: PRD.md, 30 iterations, docker mode
 ./ralph.sh PRD.md 1 docker  # one iteration sanity check
+./ralph.sh PRD.md 30 sbx    # Docker Sandboxes microVM mode
 ./ralph.sh PRD.md 30 local  # use host claude CLI instead of docker
 ./ralph.sh --tmux           # tmux split: live feed + dashboard
+./ralph.sh --build          # (re)build the sandbox image
+./ralph.sh --sbx-check      # smoke-test the Docker Sandboxes setup
 ```
 
 Each iteration:
 
 1. Reads `PRD.md` + the configurator's `PROGRESS.md` to pick the next story.
-2. Runs Claude in a Docker sandbox (no host filesystem access beyond the
-   configurator repo and `~/.claude`).
+2. Runs Claude in the sandbox (only the configurator repo rw + `PRD.md`
+   ro are visible; egress locked to an allowlist; no `~/.claude`).
 3. Implements one story. Backpressure runs `shellcheck` + `bats` from the
    configurator's perspective.
 4. Commits locally with the F13 convention (`<TYPE> [scope]: ...` +
