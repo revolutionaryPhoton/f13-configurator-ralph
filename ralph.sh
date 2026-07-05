@@ -643,7 +643,7 @@ budget_disp="unlimited"
 echo -e "${CYAN} Max turns:      ${RALPH_MAX_TURNS:-200}${NC}"
 echo -e "${CYAN} Permissions:    ${RALPH_PERMISSION_MODE:-bypass}${NC}"
 echo -e "${CYAN} Budget cap:     ${budget_disp}${NC}"
-echo -e "${CYAN} Discord:        ${RALPH_DISCORD_WEBHOOK:+enabled}${RALPH_DISCORD_WEBHOOK:-disabled}${NC}"
+echo -e "${CYAN} Discord:        $([ -n "${RALPH_DISCORD_WEBHOOK:-}" ] && echo enabled || echo disabled)${NC}"
 echo -e "${CYAN}============================================${NC}"
 
 # ── Discord: starting notification ──
