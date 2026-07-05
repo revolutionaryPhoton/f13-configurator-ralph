@@ -6,7 +6,7 @@
 
 WORKDIR="${1:-configurator_v1}"
 REFRESH="${2:-10}"
-STORIES_TOTAL=45  # keep in sync with ralph.sh
+STORIES_TOTAL_FALLBACK=44  # fallback only if PROGRESS.md has no story tables; keep in sync with ralph.sh
 case "$REFRESH" in
   0) REFRESH_SECS=0 ;;  # one-shot mode: render once and exit
   1|5|10|20|30|60) REFRESH_SECS=$(( REFRESH * 60 )) ;;
@@ -45,6 +45,22 @@ fmt_tokens() {
 
 fmt_cost() {
   printf "\$%d.%02d" "$(( $1 / 100 ))" "$(( $1 % 100 ))"
+}
+
+# Count "| Sxx |" story rows inside one "## <section>" of PROGRESS.md.
+#   $1 = section heading prefix, e.g. "Completed Stories" / "Pending Stories"
+#   $2 = filter: all | done | open  ("done" = Status cell contains **done**)
+# NOTE: keep in sync with the copy in ralph.sh.
+count_stories() {
+  awk -v sec="## $1" -v mode="${2:-all}" '
+    index($0, sec) == 1 { insec = 1; next }
+    /^## /              { insec = 0 }
+    insec && /^\| S[0-9]/ {
+      isdone = ($0 ~ /\*\*done\*\*/)
+      if (mode == "all" || (mode == "done" && isdone) || (mode == "open" && !isdone)) n++
+    }
+    END { print n + 0 }
+  ' "$WORKDIR/PROGRESS.md" 2>/dev/null || echo 0
 }
 
 # Print a line inside the box: row "content"
@@ -110,14 +126,14 @@ for uf in "$LOGDIR"/usage-*.json; do
   iter_costs+=("${cost:-0}:${iter_name}")
 done
 
-stories_done="$( (grep '^| S[0-9]' "$WORKDIR/PROGRESS.md" 2>/dev/null || true) | wc -l | tr -d ' ')"
-stories_total=$STORIES_TOTAL
-stories_pending=$(( stories_total - stories_done ))
-[ "$stories_pending" -lt 0 ] && stories_pending=0
+stories_done=$(( $(count_stories "Completed Stories" all) + $(count_stories "Pending Stories" "done") ))
+stories_total=$(( $(count_stories "Completed Stories" all) + $(count_stories "Pending Stories" all) ))
+[ "$stories_total" -eq 0 ] && stories_total=$STORIES_TOTAL_FALLBACK
+stories_pending=$(count_stories "Pending Stories" open)
 commit_count=$(git -C "$WORKDIR" rev-list --count HEAD 2>/dev/null || echo 0)
 first_commit=$(git -C "$WORKDIR" log --reverse --format='%ci' 2>/dev/null | head -1)
 last_commit=$(git -C "$WORKDIR" log -1 --format='%ci' 2>/dev/null)
-src_files=$(find "$WORKDIR/bin" "$WORKDIR/lib" -type f -name "*.sh" 2>/dev/null | wc -l | tr -d ' ')
+src_files=$(find "$WORKDIR/bin" "$WORKDIR/lib" -type f \( -name "*.sh" -o -perm -u+x \) 2>/dev/null | wc -l | tr -d ' ')
 test_files=$(find "$WORKDIR/tests" -type f -name "*.bats" 2>/dev/null | wc -l | tr -d ' ')
 
 cost_input=$(( total_input * P_IN / 1000000 ))
