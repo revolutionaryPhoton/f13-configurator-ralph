@@ -15,7 +15,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKDIR="configurator_v1"
 PROGRESS="PROGRESS.md"
 LOGDIR="ralph-logs"
-STORIES_TOTAL=45  # S00..S31 GUI + S32, S34 (7.5) + S37..S40 (Phase 8) + S41..S47 (Phase 9). HF1–HF3 are hand-fixes outside this count.
+STORIES_TOTAL_FALLBACK=44  # used only if PROGRESS.md has no story tables; live total = Completed + Pending rows (see count_stories)
 
 # ── Colors ──
 RED='\033[0;31m'
@@ -258,10 +258,9 @@ discord_iteration() {
     [ -n "$ic" ] && iter_cost_str="$(fmt_cost $ic)"
   fi
 
-  local s_done s_pending
-  s_done="$( (grep '^| S[0-9]' "$WORKDIR/$PROGRESS" 2>/dev/null || true) | wc -l | tr -d ' ')"
-  s_pending=$(( STORIES_TOTAL - s_done ))
-  [ "$s_pending" -lt 0 ] && s_pending=0
+  local s_done s_total
+  s_done=$(stories_done)
+  s_total=$(stories_total)
 
   local color=3447003  # blue
 
@@ -272,7 +271,7 @@ discord_iteration() {
     "description": "$(echo "$story_name" | sed 's/"/\\"/g')",
     "color": $color,
     "fields": [
-      {"name": "Progress", "value": "${s_done}/${STORIES_TOTAL} stories", "inline": true},
+      {"name": "Progress", "value": "${s_done}/${s_total} stories", "inline": true},
       {"name": "Duration", "value": "$duration_str", "inline": true},
       {"name": "Cost", "value": "$iter_cost_str", "inline": true}
     ],
@@ -296,7 +295,7 @@ discord_complete() {
   done
 
   local s_done commits src_f test_f
-  s_done="$( (grep '^| S[0-9]' "$WORKDIR/$PROGRESS" || true) | wc -l | tr -d ' ')"
+  s_done=$(stories_done)
   commits=$(git -C "$WORKDIR" rev-list --count HEAD 2>/dev/null || echo 0)
   src_f=$(find "$WORKDIR/bin" "$WORKDIR/lib" -type f -name "*.sh" -o -type f -perm -u+x 2>/dev/null | wc -l | tr -d ' ')
   test_f=$(find "$WORKDIR/tests" -type f -name "*.bats" 2>/dev/null | wc -l | tr -d ' ')
@@ -338,6 +337,34 @@ fmt_tokens() {
   else
     printf "%d" "$t"
   fi
+}
+
+# Count "| Sxx |" story rows inside one "## <section>" of PROGRESS.md.
+#   $1 = section heading prefix, e.g. "Completed Stories" / "Pending Stories"
+#   $2 = filter: all | done | open  ("done" = Status cell contains **done**)
+# NOTE: keep in sync with the copy in ralph-dashboard.sh.
+count_stories() {
+  awk -v sec="## $1" -v mode="${2:-all}" '
+    index($0, sec) == 1 { insec = 1; next }
+    /^## /              { insec = 0 }
+    insec && /^\| S[0-9]/ {
+      isdone = ($0 ~ /\*\*done\*\*/)
+      if (mode == "all" || (mode == "done" && isdone) || (mode == "open" && !isdone)) n++
+    }
+    END { print n + 0 }
+  ' "$WORKDIR/$PROGRESS" 2>/dev/null || echo 0
+}
+
+# Done = Completed table + Pending rows already marked **done**.
+stories_done() {
+  echo $(( $(count_stories "Completed Stories" all) + $(count_stories "Pending Stories" "done") ))
+}
+
+# Total = every story row listed, any status; fallback if tables absent.
+stories_total() {
+  local t
+  t=$(( $(count_stories "Completed Stories" all) + $(count_stories "Pending Stories" all) ))
+  if [ "$t" -gt 0 ]; then echo "$t"; else echo "$STORIES_TOTAL_FALLBACK"; fi
 }
 
 run_claude_local() {
@@ -465,9 +492,10 @@ show_dashboard() {
     v=$(grep -o '"cost_cents": *[0-9]*' "$uf" | grep -o '[0-9]*'); t_cost=$(( t_cost + ${v:-0} ))
   done
 
-  local s_done s_pending commits src_f test_f
-  s_done="$( (grep '^| S[0-9]' "$WORKDIR/$PROGRESS" 2>/dev/null || true) | wc -l | tr -d ' ')"
-  s_pending=$(( STORIES_TOTAL - s_done )); [ "$s_pending" -lt 0 ] && s_pending=0
+  local s_done s_total s_pending commits src_f test_f
+  s_done=$(stories_done)
+  s_total=$(stories_total)
+  s_pending=$(count_stories "Pending Stories" open)
   commits=$(git -C "$WORKDIR" rev-list --count HEAD 2>/dev/null || echo 0)
   src_f=$(find "$WORKDIR/bin" "$WORKDIR/lib" -type f -name "*.sh" 2>/dev/null | wc -l | tr -d ' ')
   test_f=$(find "$WORKDIR/tests" -type f -name "*.bats" 2>/dev/null | wc -l | tr -d ' ')
@@ -512,7 +540,7 @@ show_dashboard() {
   _rowb "  Progress & Cost (Opus API Pricing)"
   _sep
   _row ""
-  _row "$(printf 'Stories:   %d / %d done    (%d pending)' "$s_done" "$STORIES_TOTAL" "$s_pending")"
+  _row "$(printf 'Stories:   %d / %d done    (%d pending)' "$s_done" "$s_total" "$s_pending")"
   _row "$(printf 'Commits:   %d total       Iterations: %d tracked' "$commits" "$i_count")"
   _row ""
   _row "$(printf '%-24s %8s tokens   %s' 'Input (uncached):' "$(fmt_tokens $t_in)" "$(fmt_cost $c_in)")"
@@ -554,16 +582,16 @@ EOJSON
 
 # ── Pre-flight: check if already complete ──
 if grep -q '## Pending Stories' "$WORKDIR/$PROGRESS" 2>/dev/null; then
-  pending_count="$( (grep '^| S[0-9]' "$WORKDIR/$PROGRESS" || true) | wc -l | tr -d ' ')"
+  pending_count=$(count_stories "Pending Stories" open)
   if [ "$pending_count" -eq 0 ]; then
     echo ""
     echo -e "${GREEN}============================================${NC}"
     echo -e "${GREEN} All stories already complete!${NC}"
     echo -e "${GREEN}============================================${NC}"
     echo ""
-    stories_done="$( (grep '^| S[0-9]' "$WORKDIR/$PROGRESS" || true) | wc -l | tr -d ' ')"
+    done_count=$(stories_done)
     commits=$(git -C "$WORKDIR" rev-list --count HEAD 2>/dev/null || echo 0)
-    echo -e "  Stories done: ${stories_done:-0}"
+    echo -e "  Stories done: ${done_count:-0}"
     echo -e "  Commits:      $commits"
     echo ""
     git -C "$WORKDIR" log --oneline -10
@@ -604,7 +632,7 @@ while [ "$ITERATION" -lt "$MAX_ITERATIONS" ]; do
   if echo "$OUTPUT" | grep -q '<promise>COMPLETE</promise>'; then
     is_complete=true
   elif grep -q '## Pending Stories' "$WORKDIR/$PROGRESS" 2>/dev/null; then
-    pending_count="$( (grep '^| S[0-9]' "$WORKDIR/$PROGRESS" || true) | wc -l | tr -d ' ')"
+    pending_count=$(count_stories "Pending Stories" open)
     [ "$pending_count" -eq 0 ] && is_complete=true
   fi
 
