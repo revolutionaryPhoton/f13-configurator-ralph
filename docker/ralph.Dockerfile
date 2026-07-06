@@ -13,6 +13,11 @@ ARG GID=20
 ARG GIT_USER_NAME="David Moch"
 ARG GIT_USER_EMAIL="david.moch@gmail.com"
 
+# Baked host identity — ensure_docker_image compares these labels against
+# the current host uid/gid and auto-rebuilds on mismatch (e.g. after
+# moving the repo between macOS uid 501 and Linux uid 1000).
+LABEL f13.ralph.uid="${UID}" f13.ralph.gid="${GID}"
+
 # Debian toolchain set; per-package pins are impractical — the base image
 # digest pin fixes the apt snapshot instead.
 # hadolint ignore=DL3008

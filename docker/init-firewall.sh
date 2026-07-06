@@ -46,6 +46,18 @@ iptables -P OUTPUT DROP
 iptables -P INPUT DROP
 iptables -P FORWARD DROP
 
+# IPv6: the allowlist is v4-only, so drop v6 entirely (loopback excepted).
+# Without this, a host with container IPv6 egress would bypass the firewall.
+if command -v ip6tables >/dev/null 2>&1; then
+  ip6tables -F OUTPUT 2>/dev/null || true
+  ip6tables -F INPUT 2>/dev/null || true
+  ip6tables -A OUTPUT -o lo -j ACCEPT 2>/dev/null || true
+  ip6tables -A INPUT -i lo -j ACCEPT 2>/dev/null || true
+  ip6tables -P OUTPUT DROP 2>/dev/null || true
+  ip6tables -P INPUT DROP 2>/dev/null || true
+  ip6tables -P FORWARD DROP 2>/dev/null || true
+fi
+
 # Self-check: a non-allowlisted host must be unreachable, Anthropic must
 # connect (any HTTP status counts — only the TCP/TLS path matters here).
 if curl -s -m 5 https://example.com >/dev/null 2>&1; then

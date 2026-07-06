@@ -109,10 +109,12 @@ What this means for users / contributors of either repo:
   (`brew trust docker/tap && brew install docker/tap/sbx`) and a
   one-time `sbx login`; the old `docker sandbox` Desktop plugin was
   removed by Docker in mid-2026.
-- Egress is locked by sbx network policies: the harness initializes
-  the one-time **global policy as `deny-all`** (this applies to ALL
-  your sbx sandboxes; agent kits add their own per-sandbox allows) and
-  grants this sandbox the same allowlist as docker mode
+- Egress is locked by sbx network policies. The one-time **global
+  policy** is a machine-wide decision (it applies to ALL your sbx
+  sandboxes; agent kits add their own per-sandbox allows) — the
+  harness therefore never initializes it silently: it aborts with
+  instructions unless you opt in via `RALPH_SBX_POLICY_INIT=deny-all`.
+  The loop's sandbox then gets the same allowlist as docker mode
   (`sbx policy allow network --sandbox f13-ralph ...`). Blocked
   requests receive HTTP 403.
 - The sandbox mounts only `configurator_v1/` (rw, at its host path) and

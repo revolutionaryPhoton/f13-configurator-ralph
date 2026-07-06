@@ -55,7 +55,7 @@ backpressure checks, commit, repeat.
 | Mode | Isolation | Notes |
 |---|---|---|
 | `docker` (default) | Hardened container: prebuilt pinned image, only the product repo + PRD (ro) mounted, no `~/.claude`, default-DROP egress allowlist, non-root agent | `./ralph.sh` — image auto-builds on first run (`./ralph.sh --build` to rebuild) |
-| `sbx` | **Docker Sandboxes microVM**: hypervisor boundary, policy-enforced egress allowlist. Needs the `sbx` CLI (`brew trust docker/tap && brew install docker/tap/sbx`) + one-time `sbx login` | `./ralph.sh PRD.md 30 sbx` — smoke-test first with `./ralph.sh --sbx-check` |
+| `sbx` | **Docker Sandboxes microVM** (*experimental*): hypervisor boundary, policy-enforced egress allowlist. Needs the `sbx` CLI (`brew trust docker/tap && brew install docker/tap/sbx`) + one-time `sbx login` | `./ralph.sh PRD.md 30 sbx` — smoke-test first with `./ralph.sh --sbx-check` |
 | `local` | None (host CLI) | `./ralph.sh PRD.md 30 local` — for sanity checks only |
 
 Guardrails in every mode: `--max-turns` per iteration (`RALPH_MAX_TURNS`,

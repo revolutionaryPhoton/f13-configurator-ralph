@@ -446,7 +446,13 @@ total_cost_cents() {
 # Returns 1 (abort the loop) once spent >= cap.
 check_budget() {
   local cap="${RALPH_MAX_BUDGET_CENTS:-0}"
-  [ "$cap" -gt 0 ] 2>/dev/null || return 0
+  case "$cap" in
+    ''|0) return 0 ;;
+    *[!0-9]*)
+      # A malformed cap must abort, not silently mean "unlimited".
+      echo -e "${RED}ERR: RALPH_MAX_BUDGET_CENTS must be a whole number of cents (got '$cap').${NC}"
+      return 1 ;;
+  esac
   local spent
   spent=$(total_cost_cents)
   [ "$spent" -lt "$cap" ] && return 0
@@ -469,11 +475,19 @@ EOJSON
   return 1
 }
 
-# Build the prebuilt sandbox image if missing (or forced via --build).
+# Build the prebuilt sandbox image if missing, if its baked uid/gid no
+# longer match the host (self-heals after moving between machines), or
+# when forced via --build.
 # Build context is docker/ only — the harness repo is never sent to the daemon.
 ensure_docker_image() {
   if [ "${1:-}" != "--force" ] && docker image inspect "$RALPH_IMAGE" >/dev/null 2>&1; then
-    return 0
+    local baked_uid baked_gid
+    baked_uid=$(docker image inspect -f '{{index .Config.Labels "f13.ralph.uid"}}' "$RALPH_IMAGE" 2>/dev/null)
+    baked_gid=$(docker image inspect -f '{{index .Config.Labels "f13.ralph.gid"}}' "$RALPH_IMAGE" 2>/dev/null)
+    if [ "$baked_uid" = "$(id -u)" ] && [ "$baked_gid" = "$(id -g)" ]; then
+      return 0
+    fi
+    echo -e "${YELLOW}Image $RALPH_IMAGE was built for uid/gid ${baked_uid:-?}/${baked_gid:-?}, host is $(id -u)/$(id -g) — rebuilding.${NC}"
   fi
   echo -e "${CYAN}Building sandbox image $RALPH_IMAGE ...${NC}"
   docker build \
@@ -498,9 +512,13 @@ SBX_PRD_DIR="$SCRIPT_DIR/.ralph-sbx"  # gitignored one-file staging dir (ro in s
 SBX_ALLOW_HOSTS="api.anthropic.com,registry.npmjs.org,crates.io,static.crates.io,index.crates.io"
 
 ensure_sbx_sandbox() {
+  # Auth first — everything below would otherwise fail with the same
+  # error and mask the real cause.
+  sbx ls >/dev/null 2>&1 \
+    || { echo -e "${RED}ERR: sbx not authenticated. Run: sbx login${NC}"; return 1; }
   # sbx runs its own image store inside the VM — build on the host
   # daemon, then load the tar into the sandbox runtime when missing.
-  if ! sbx template ls 2>/dev/null | grep -q "f13-ralph-sbx"; then
+  if ! sbx template ls 2>/dev/null | awk '{print $1}' | grep -qx -e "${SBX_TEMPLATE%%:*}" -e "$SBX_TEMPLATE"; then
     if ! docker image inspect "$SBX_TEMPLATE" >/dev/null 2>&1; then
       echo -e "${CYAN}Building sbx template $SBX_TEMPLATE ...${NC}"
       docker build -t "$SBX_TEMPLATE" \
@@ -516,18 +534,27 @@ ensure_sbx_sandbox() {
     rm -f "$tarf"
   fi
   # Global network policy must be initialized before the first sandbox
-  # start. deny-all matches this harness's posture: nothing leaves any
-  # sandbox unless allowed per sandbox (agent kits add their own rules).
+  # start. Initializing it is a ONE-TIME, MACHINE-WIDE decision (applies
+  # to all sbx sandboxes, not just this loop's), so the harness never
+  # does it silently — the operator opts in via RALPH_SBX_POLICY_INIT.
   if ! sbx policy ls >/dev/null 2>&1; then
-    echo -e "${CYAN}Initializing global sbx network policy (deny-all) ...${NC}"
-    sbx policy init deny-all \
-      || { echo -e "${RED}ERR: sbx policy init failed.${NC}"; return 1; }
+    if [ "${RALPH_SBX_POLICY_INIT:-}" = "deny-all" ]; then
+      echo -e "${CYAN}Initializing global sbx network policy (deny-all, per RALPH_SBX_POLICY_INIT) ...${NC}"
+      sbx policy init deny-all \
+        || { echo -e "${RED}ERR: sbx policy init failed.${NC}"; return 1; }
+    else
+      echo -e "${RED}ERR: the global sbx network policy is not initialized.${NC}"
+      echo -e "${RED}This is a one-time, machine-wide choice affecting ALL sbx sandboxes.${NC}"
+      echo -e "${RED}Either run:  sbx policy init deny-all   (recommended for this loop)${NC}"
+      echo -e "${RED}or set RALPH_SBX_POLICY_INIT=deny-all to let ralph.sh do it for you.${NC}"
+      return 1
+    fi
   fi
   # Sandboxes mount host paths verbatim — stage PRD.md in a dedicated
   # one-file dir so the harness repo itself is never exposed.
   mkdir -p "$SBX_PRD_DIR"
   cp "$PRD_ABS" "$SBX_PRD_DIR/PRD.md"
-  if ! sbx ls 2>/dev/null | grep -q "$SBX_NAME"; then
+  if ! sbx ls 2>/dev/null | awk '{print $1}' | grep -qx "$SBX_NAME"; then
     echo -e "${CYAN}Creating sandbox $SBX_NAME (workspace: $WORKDIR_HOST) ...${NC}"
     sbx create -t "$SBX_TEMPLATE" --name "$SBX_NAME" -q claude \
       "$WORKDIR_HOST" "$SBX_PRD_DIR:ro" \
