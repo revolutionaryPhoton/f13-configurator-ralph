@@ -118,11 +118,10 @@ What this means for users / contributors of either repo:
   (`sbx policy allow network --sandbox f13-ralph ...`). Blocked
   requests receive HTTP 403.
 - The sandbox mounts only `configurator_v1/` (rw, at its host path) and
-  a staged copy of `PRD.md` in `.ralph-sbx/` (ro). Verified on the old
-  plugin runtime: no `~/.claude` credentials are copied in, and the
-  template's github credential helper has no token to serve — pushes
-  fail by design, same as docker mode. Re-verify with `--sbx-check`
-  after sbx CLI updates.
+  a staged copy of `PRD.md` in `.ralph-sbx/` (ro). Verified on the sbx
+  CLI runtime (v0.34): no `~/.claude` credentials are copied in, and
+  the github credential helper has no token to serve — pushes fail by
+  design, same as docker mode.
 - The template image is built on the host daemon and loaded into the
   sandbox runtime's own image store via `sbx template load`.
 - The sandbox is created once and reused (persistent npm/cargo caches);
