@@ -99,7 +99,10 @@ esac
 
 # ── Create working directory and init git repo ──
 mkdir -p "$WORKDIR"
-if ! git -C "$WORKDIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+# Check for the workdir's OWN .git — rev-parse --is-inside-work-tree would
+# also succeed for a plain directory nested inside another repo (e.g. a
+# smoke-test workdir inside this harness repo), silently skipping the init.
+if [ ! -d "$WORKDIR/.git" ]; then
   git init "$WORKDIR"
   echo -e "${GREEN}Initialized git repo in $WORKDIR/${NC}"
 fi

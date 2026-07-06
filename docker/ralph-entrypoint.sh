@@ -11,6 +11,10 @@ else
   echo "firewall: DISABLED (RALPH_FIREWALL=off)" >&2
 fi
 
-exec setpriv --reuid ralph --regid ralph --init-groups \
+# ralph's primary group may be a pre-existing system group (e.g. host
+# gid 20 = dialout on Debian), so resolve it numerically — a literal
+# "--regid ralph" fails when no group of that name exists.
+ralph_gid="$(id -g ralph)"
+exec setpriv --reuid ralph --regid "$ralph_gid" --init-groups \
   env HOME=/home/ralph PATH="/usr/local/cargo/bin:/usr/local/bin:/usr/bin:/bin" \
   stdbuf -oL claude "$@" < /prompt.txt
