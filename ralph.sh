@@ -577,15 +577,14 @@ run_claude_sbx() {
   # Workspaces mount at the host path, so /PRD.md does not exist in sbx
   # mode — point the prompt at the staged copy instead.
   iter_prompt="${iter_prompt///PRD.md/$SBX_PRD_DIR/PRD.md}"
-  # Token via --env-file (0600 tmpfile) so it never appears on argv.
-  local envf
-  envf="$(mktemp)"
-  chmod 600 "$envf"
-  printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\nCLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1\n' \
-    "${CLAUDE_CODE_OAUTH_TOKEN}" > "$envf"
-  sbx exec --env-file "$envf" -w "$WORKDIR_HOST" "$SBX_NAME" \
-    stdbuf -oL claude "${CLAUDE_FLAGS[@]}" "$iter_prompt"
-  rm -f "$envf"
+  # Token via value-less -e pass-through: sbx reads the value from this
+  # process's environment, so it never appears on argv. (--env-file is
+  # silently ignored by sbx v0.34 — verified; do not use it.)
+  # </dev/null skips sbx's 3s stdin wait: the prompt is passed as an arg.
+  sbx exec -e CLAUDE_CODE_OAUTH_TOKEN \
+    -e CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \
+    -w "$WORKDIR_HOST" "$SBX_NAME" \
+    stdbuf -oL claude "${CLAUDE_FLAGS[@]}" "$iter_prompt" < /dev/null
 }
 
 sbx_check() {

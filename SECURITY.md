@@ -47,10 +47,10 @@ What this means for users / contributors of either repo:
   ```bash
   export CLAUDE_CODE_OAUTH_TOKEN="sk-ant-oat01-..."
   ```
-- `ralph.sh` forwards it into the docker container via a value-less
-  `-e CLAUDE_CODE_OAUTH_TOKEN` (so it never appears on the script's own
-  argv), and into sbx sandboxes via a `0600` temp env-file. It is not
-  written to disk inside the container, but it IS visible via
+- `ralph.sh` forwards it into both the docker container and sbx
+  sandboxes via a value-less `-e CLAUDE_CODE_OAUTH_TOKEN` (the CLI
+  reads the value from the environment, so it never appears on argv).
+  It is not written to disk inside the container, but it IS visible via
   `docker inspect` while the container runs. Don't share the host while
   a loop is in flight.
 - The token is the ONLY credential the sandbox sees — `~/.claude` is
