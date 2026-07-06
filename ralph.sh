@@ -729,7 +729,12 @@ show_dashboard() {
   iter_dur="$(( dur / 60 ))m $(( dur % 60 ))s"
 
   local new_commits
-  new_commits=$(git -C "$WORKDIR" log --oneline "$commit_before..HEAD" 2>/dev/null || true)
+  if [ -n "$commit_before" ]; then
+    new_commits=$(git -C "$WORKDIR" log --oneline "$commit_before..HEAD" 2>/dev/null || true)
+  else
+    # Fresh repo: no HEAD existed before this iteration — everything is new.
+    new_commits=$(git -C "$WORKDIR" log --oneline 2>/dev/null || true)
+  fi
 
   echo ""
   _top
