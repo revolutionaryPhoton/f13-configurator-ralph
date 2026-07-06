@@ -11,10 +11,12 @@ on:
     branches: [main]
     paths:
       - "**/*.sh"
+      - "docker/**"
       - ".github/workflows/**"
   pull_request:
     paths:
       - "**/*.sh"
+      - "docker/**"
       - ".github/workflows/**"
 
 jobs:
@@ -33,5 +35,19 @@ jobs:
       # - SC2034: unused color variables (kept for symmetry / future use)
       # - SC2207: array splitting in ralph-dashboard.sh top-5 sort
       #   (would require a refactor; behavior is currently correct)
-      - name: shellcheck -S warning ralph*.sh
-        run: shellcheck -S warning --exclude=SC2034,SC2207 ralph*.sh
+      - name: shellcheck -S warning ralph*.sh docker/*.sh
+        run: shellcheck -S warning --exclude=SC2034,SC2207 ralph*.sh docker/*.sh
+
+  hadolint:
+    name: hadolint (Dockerfiles)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: hadolint docker/*.Dockerfile
+        uses: hadolint/hadolint-action@v3.3.0
+        with:
+          recursive: true
+          dockerfile: "*.Dockerfile"

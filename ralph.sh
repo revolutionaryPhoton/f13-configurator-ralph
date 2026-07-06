@@ -8,11 +8,19 @@ set -uo pipefail
 #   ./ralph.sh                          # defaults: PRD.md, 30 iterations, docker
 #   ./ralph.sh PRD.md 20                # custom PRD and iteration count
 #   ./ralph.sh PRD.md 30 local          # run locally (no Docker sandbox)
+#   ./ralph.sh PRD.md 30 sbx            # Docker Sandboxes microVM (Desktop 4.58+)
 #   ./ralph.sh --tmux                   # launch in tmux split (live feed + dashboard)
 #   ./ralph.sh --tmux PRD.md 20 docker  # tmux with custom args
+#   ./ralph.sh --build                  # (re)build the sandbox image and exit
+#   ./ralph.sh --sbx-check              # smoke-test the Docker Sandboxes setup
+#
+# Env knobs (see .env.example): RALPH_MAX_BUDGET_CENTS, RALPH_MAX_TURNS,
+# RALPH_PERMISSION_MODE, RALPH_IMAGE, RALPH_CLAUDE_CODE_VERSION,
+# RALPH_FIREWALL, RALPH_NET_ALLOW_EXTRA, RALPH_WORKDIR, RALPH_SBX_NAME,
+# RALPH_SBX_TEMPLATE
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORKDIR="configurator_v1"
+WORKDIR="${RALPH_WORKDIR:-configurator_v1}"
 PROGRESS="PROGRESS.md"
 LOGDIR="ralph-logs"
 STORIES_TOTAL_FALLBACK=44  # used only if PROGRESS.md has no story tables; live total = Completed + Pending rows (see count_stories)
@@ -30,6 +38,20 @@ NC='\033[0m'
 TMUX_MODE=false
 if [ "${1:-}" = "--tmux" ]; then
   TMUX_MODE=true
+  shift
+fi
+
+# ── Build-only mode: (re)build the sandbox image and exit ──
+BUILD_ONLY=false
+if [ "${1:-}" = "--build" ]; then
+  BUILD_ONLY=true
+  shift
+fi
+
+# ── Sbx smoke-test mode: verify Docker Sandboxes setup and exit ──
+SBX_CHECK=false
+if [ "${1:-}" = "--sbx-check" ]; then
+  SBX_CHECK=true
   shift
 fi
 
@@ -57,12 +79,30 @@ fi
 # shellcheck source=/dev/null
 [ -f "$SCRIPT_DIR/.env.local" ] && source "$SCRIPT_DIR/.env.local"
 
+# Re-evaluate values that .env.local may set
+WORKDIR="${RALPH_WORKDIR:-$WORKDIR}"
+RALPH_IMAGE="${RALPH_IMAGE:-f13-ralph:latest}"
+
 # ── Sanity checks ──
 [ -f "$PRD" ] || { echo -e "${RED}ERR: $PRD not found.${NC}"; exit 1; }
+case "$MODE" in
+  docker|local|sbx) ;;
+  *) echo -e "${RED}ERR: unknown mode '$MODE' (docker|local|sbx).${NC}"; exit 1 ;;
+esac
+
+# Absolute paths for container mounts
+PRD_ABS="$(cd "$(dirname "$PRD")" && pwd)/$(basename "$PRD")"
+case "$WORKDIR" in
+  /*) WORKDIR_HOST="$WORKDIR" ;;
+  *)  WORKDIR_HOST="$(pwd)/$WORKDIR" ;;
+esac
 
 # ── Create working directory and init git repo ──
 mkdir -p "$WORKDIR"
-if ! git -C "$WORKDIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+# Check for the workdir's OWN .git — rev-parse --is-inside-work-tree would
+# also succeed for a plain directory nested inside another repo (e.g. a
+# smoke-test workdir inside this harness repo), silently skipping the init.
+if [ ! -d "$WORKDIR/.git" ]; then
   git init "$WORKDIR"
   echo -e "${GREEN}Initialized git repo in $WORKDIR/${NC}"
 fi
@@ -91,7 +131,7 @@ Read /PRD.md for all rules. Key points:
 - Every commit MUST end with: Co-Authored-By: Claude Code
 - Update PROGRESS.md after every commit (see PRD for format).
 - Never modify files in ../core, ../chat, ../frontend -- read-only references.
-- Build everything in the current directory (/app inside Docker). Do NOT
+- Build everything in the current directory (/workspace inside Docker). Do NOT
   create a subdirectory for the project.
 - Keycloak: guest mode on core (authentication.guest_mode: true) and
   KEYCLOAK_DISABLED=true on frontend. No Keycloak container is spun up.
@@ -158,12 +198,20 @@ LOOPCTX
   echo -e "${GREEN}Created $WORKDIR/LOOP_CONTEXT.md${NC}"
 fi
 
-if [ "$MODE" = "docker" ]; then
-  command -v docker >/dev/null 2>&1 || { echo -e "${RED}ERR: Docker not found.${NC}"; exit 1; }
-  [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] || { echo -e "${RED}ERR: CLAUDE_CODE_OAUTH_TOKEN not set.${NC}"; exit 1; }
-else
-  command -v claude >/dev/null 2>&1 || { echo -e "${RED}ERR: claude not found. Install: npm i -g @anthropic-ai/claude-code${NC}"; exit 1; }
-fi
+case "$MODE" in
+  docker)
+    command -v docker >/dev/null 2>&1 || { echo -e "${RED}ERR: Docker not found.${NC}"; exit 1; }
+    # --build / --sbx-check need no token — they never invoke claude with a prompt.
+    [ "$BUILD_ONLY" = true ] || [ "$SBX_CHECK" = true ] || [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] || { echo -e "${RED}ERR: CLAUDE_CODE_OAUTH_TOKEN not set.${NC}"; exit 1; }
+    ;;
+  sbx)
+    command -v sbx >/dev/null 2>&1 || { echo -e "${RED}ERR: sbx CLI not found. Install: brew trust docker/tap && brew install docker/tap/sbx${NC}"; exit 1; }
+    [ "$SBX_CHECK" = true ] || [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] || { echo -e "${RED}ERR: CLAUDE_CODE_OAUTH_TOKEN not set.${NC}"; exit 1; }
+    ;;
+  local)
+    command -v claude >/dev/null 2>&1 || { echo -e "${RED}ERR: claude not found. Install: npm i -g @anthropic-ai/claude-code${NC}"; exit 1; }
+    ;;
+esac
 
 # Initialize progress file and log directory
 [ -f "$WORKDIR/$PROGRESS" ] || echo "# F13 Shell Configurator -- Progress" > "$WORKDIR/$PROGRESS"
@@ -285,13 +333,11 @@ EOJSON
 discord_complete() {
   [ -z "${RALPH_DISCORD_WEBHOOK:-}" ] && return
 
-  local t_cost=0 t_iterations=0
+  local t_cost t_iterations=0
+  t_cost=$(total_cost_cents)
   for uf in "$WORKDIR/$LOGDIR"/usage-*.json; do
     [ -f "$uf" ] || continue
     t_iterations=$(( t_iterations + 1 ))
-    local c
-    c=$(grep -o '"cost_cents": *[0-9]*' "$uf" 2>/dev/null | grep -o '[0-9]*' || true)
-    [ -n "$c" ] && t_cost=$(( t_cost + c ))
   done
 
   local s_done commits src_f test_f
@@ -367,75 +413,239 @@ stories_total() {
   if [ "$t" -gt 0 ]; then echo "$t"; else echo "$STORIES_TOTAL_FALLBACK"; fi
 }
 
-run_claude_local() {
-  local iter_prompt="${PROMPT//ITER_NUM/$1}"
-  (cd "$WORKDIR" && claude --dangerously-skip-permissions --verbose --output-format stream-json -p "$iter_prompt")
+# Per-invocation claude flags shared by all modes. Defaults reproduce the
+# historical behavior plus a --max-turns runaway guard.
+#   RALPH_MAX_TURNS        per-iteration turn cap (default 200; 0 = unlimited)
+#   RALPH_PERMISSION_MODE  bypass (default, --dangerously-skip-permissions;
+#                          safe only inside the sandbox) or a claude
+#                          --permission-mode value such as acceptEdits
+CLAUDE_FLAGS=()
+build_claude_flags() {
+  CLAUDE_FLAGS=(--verbose --output-format stream-json)
+  local turns="${RALPH_MAX_TURNS:-200}"
+  if [ "$turns" != "0" ]; then
+    CLAUDE_FLAGS+=(--max-turns "$turns")
+  fi
+  case "${RALPH_PERMISSION_MODE:-bypass}" in
+    bypass) CLAUDE_FLAGS+=(--dangerously-skip-permissions) ;;
+    *)      CLAUDE_FLAGS+=(--permission-mode "$RALPH_PERMISSION_MODE") ;;
+  esac
+  CLAUDE_FLAGS+=(-p)
 }
 
+# Cumulative cost in cents across every usage-*.json in the log dir
+# (lifetime of the log dir, i.e. across runs).
+total_cost_cents() {
+  local t=0 c uf
+  for uf in "$WORKDIR/$LOGDIR"/usage-*.json; do
+    [ -f "$uf" ] || continue
+    c=$(grep -o '"cost_cents": *[0-9]*' "$uf" 2>/dev/null | grep -o '[0-9]*' || true)
+    [ -n "$c" ] && t=$(( t + c ))
+  done
+  echo "$t"
+}
+
+# Budget kill-switch: RALPH_MAX_BUDGET_CENTS > 0 caps cumulative spend.
+# Returns 1 (abort the loop) once spent >= cap.
+check_budget() {
+  local cap="${RALPH_MAX_BUDGET_CENTS:-0}"
+  case "$cap" in
+    ''|0) return 0 ;;
+    *[!0-9]*)
+      # A malformed cap must abort, not silently mean "unlimited".
+      echo -e "${RED}ERR: RALPH_MAX_BUDGET_CENTS must be a whole number of cents (got '$cap').${NC}"
+      return 1 ;;
+  esac
+  local spent
+  spent=$(total_cost_cents)
+  [ "$spent" -lt "$cap" ] && return 0
+  echo ""
+  echo -e "${RED}============================================${NC}"
+  echo -e "${RED} BUDGET CAP HIT: $(fmt_cost "$spent") spent >= cap $(fmt_cost "$cap")${NC}"
+  echo -e "${RED} Aborting loop (RALPH_MAX_BUDGET_CENTS=$cap)${NC}"
+  echo -e "${RED}============================================${NC}"
+  discord_notify "$(cat <<EOJSON
+{
+  "embeds": [{
+    "title": "Ralph Loop ABORTED — budget cap",
+    "description": "Spent $(fmt_cost "$spent") of cap $(fmt_cost "$cap") (RALPH_MAX_BUDGET_CENTS=$cap)",
+    "color": 15548997,
+    "footer": {"text": "Ralph Loop - $WORKDIR"}
+  }]
+}
+EOJSON
+)"
+  return 1
+}
+
+# Build the prebuilt sandbox image if missing, if its baked uid/gid no
+# longer match the host (self-heals after moving between machines), or
+# when forced via --build.
+# Build context is docker/ only — the harness repo is never sent to the daemon.
+ensure_docker_image() {
+  if [ "${1:-}" != "--force" ] && docker image inspect "$RALPH_IMAGE" >/dev/null 2>&1; then
+    local baked_uid baked_gid
+    baked_uid=$(docker image inspect -f '{{index .Config.Labels "f13.ralph.uid"}}' "$RALPH_IMAGE" 2>/dev/null)
+    baked_gid=$(docker image inspect -f '{{index .Config.Labels "f13.ralph.gid"}}' "$RALPH_IMAGE" 2>/dev/null)
+    if [ "$baked_uid" = "$(id -u)" ] && [ "$baked_gid" = "$(id -g)" ]; then
+      return 0
+    fi
+    echo -e "${YELLOW}Image $RALPH_IMAGE was built for uid/gid ${baked_uid:-?}/${baked_gid:-?}, host is $(id -u)/$(id -g) — rebuilding.${NC}"
+  fi
+  echo -e "${CYAN}Building sandbox image $RALPH_IMAGE ...${NC}"
+  docker build \
+    --build-arg UID="$(id -u)" --build-arg GID="$(id -g)" \
+    ${RALPH_CLAUDE_CODE_VERSION:+--build-arg CLAUDE_CODE_VERSION="$RALPH_CLAUDE_CODE_VERSION"} \
+    -t "$RALPH_IMAGE" \
+    -f "$SCRIPT_DIR/docker/ralph.Dockerfile" "$SCRIPT_DIR/docker" \
+    || { echo -e "${RED}ERR: docker build failed.${NC}"; return 1; }
+}
+
+# ── Docker Sandboxes (MODE=sbx): microVM isolation via the sbx CLI ──
+# Install: brew trust docker/tap && brew install docker/tap/sbx
+# (the old "docker sandbox" plugin was removed by Docker in 2026-06).
+# One-time: sbx login (Docker sign-in).
+# The sandbox is created once and reused (fast iterations, persistent
+# cargo/npm caches); each `exec ... claude -p` is still a fresh
+# conversation, so fresh-context-per-iteration is preserved.
+# Reset with: sbx rm "$SBX_NAME"
+SBX_NAME="${RALPH_SBX_NAME:-f13-ralph}"
+SBX_TEMPLATE="${RALPH_SBX_TEMPLATE:-f13-ralph-sbx:latest}"
+SBX_PRD_DIR="$SCRIPT_DIR/.ralph-sbx"  # gitignored one-file staging dir (ro in sandbox)
+SBX_ALLOW_HOSTS="api.anthropic.com,registry.npmjs.org,crates.io,static.crates.io,index.crates.io"
+
+ensure_sbx_sandbox() {
+  # Auth first — everything below would otherwise fail with the same
+  # error and mask the real cause.
+  sbx ls >/dev/null 2>&1 \
+    || { echo -e "${RED}ERR: sbx not authenticated. Run: sbx login${NC}"; return 1; }
+  # sbx runs its own image store inside the VM — build on the host
+  # daemon, then load the tar into the sandbox runtime when missing.
+  if ! sbx template ls 2>/dev/null | awk '{print $1}' | grep -qx -e "${SBX_TEMPLATE%%:*}" -e "$SBX_TEMPLATE"; then
+    if ! docker image inspect "$SBX_TEMPLATE" >/dev/null 2>&1; then
+      echo -e "${CYAN}Building sbx template $SBX_TEMPLATE ...${NC}"
+      docker build -t "$SBX_TEMPLATE" \
+        -f "$SCRIPT_DIR/docker/sbx-template.Dockerfile" "$SCRIPT_DIR/docker" \
+        || { echo -e "${RED}ERR: sbx template build failed.${NC}"; return 1; }
+    fi
+    echo -e "${CYAN}Loading template into the sandbox runtime ...${NC}"
+    local tarf
+    tarf="$(mktemp -u).tar"
+    docker save -o "$tarf" "$SBX_TEMPLATE" \
+      && sbx template load "$tarf" \
+      || { rm -f "$tarf"; echo -e "${RED}ERR: sbx template load failed.${NC}"; return 1; }
+    rm -f "$tarf"
+  fi
+  # Global network policy must be initialized before the first sandbox
+  # start. Initializing it is a ONE-TIME, MACHINE-WIDE decision (applies
+  # to all sbx sandboxes, not just this loop's), so the harness never
+  # does it silently — the operator opts in via RALPH_SBX_POLICY_INIT.
+  if ! sbx policy ls >/dev/null 2>&1; then
+    if [ "${RALPH_SBX_POLICY_INIT:-}" = "deny-all" ]; then
+      echo -e "${CYAN}Initializing global sbx network policy (deny-all, per RALPH_SBX_POLICY_INIT) ...${NC}"
+      sbx policy init deny-all \
+        || { echo -e "${RED}ERR: sbx policy init failed.${NC}"; return 1; }
+    else
+      echo -e "${RED}ERR: the global sbx network policy is not initialized.${NC}"
+      echo -e "${RED}This is a one-time, machine-wide choice affecting ALL sbx sandboxes.${NC}"
+      echo -e "${RED}Either run:  sbx policy init deny-all   (recommended for this loop)${NC}"
+      echo -e "${RED}or set RALPH_SBX_POLICY_INIT=deny-all to let ralph.sh do it for you.${NC}"
+      return 1
+    fi
+  fi
+  # Sandboxes mount host paths verbatim — stage PRD.md in a dedicated
+  # one-file dir so the harness repo itself is never exposed.
+  mkdir -p "$SBX_PRD_DIR"
+  cp "$PRD_ABS" "$SBX_PRD_DIR/PRD.md"
+  if ! sbx ls 2>/dev/null | awk '{print $1}' | grep -qx "$SBX_NAME"; then
+    echo -e "${CYAN}Creating sandbox $SBX_NAME (workspace: $WORKDIR_HOST) ...${NC}"
+    sbx create -t "$SBX_TEMPLATE" --name "$SBX_NAME" -q claude \
+      "$WORKDIR_HOST" "$SBX_PRD_DIR:ro" \
+      || { echo -e "${RED}ERR: sbx create failed.${NC}"; return 1; }
+    local allow="$SBX_ALLOW_HOSTS"
+    local extra
+    for extra in ${RALPH_NET_ALLOW_EXTRA:-}; do
+      allow="$allow,$extra"
+    done
+    sbx policy allow network --sandbox "$SBX_NAME" "$allow" \
+      || { echo -e "${RED}ERR: sbx allowlist failed.${NC}"; return 1; }
+  fi
+}
+
+run_claude_sbx() {
+  local iter_prompt="${PROMPT//ITER_NUM/$1}"
+  # Workspaces mount at the host path, so /PRD.md does not exist in sbx
+  # mode — point the prompt at the staged copy instead.
+  iter_prompt="${iter_prompt///PRD.md/$SBX_PRD_DIR/PRD.md}"
+  # Token via value-less -e pass-through: sbx reads the value from this
+  # process's environment, so it never appears on argv. (--env-file is
+  # silently ignored by sbx v0.34 — verified; do not use it.)
+  # </dev/null skips sbx's 3s stdin wait: the prompt is passed as an arg.
+  sbx exec -e CLAUDE_CODE_OAUTH_TOKEN \
+    -e CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \
+    -w "$WORKDIR_HOST" "$SBX_NAME" \
+    stdbuf -oL claude "${CLAUDE_FLAGS[@]}" "$iter_prompt" < /dev/null
+}
+
+sbx_check() {
+  echo -e "${CYAN}sbx check: sbx CLI ...${NC}"
+  command -v sbx >/dev/null 2>&1 \
+    || { echo -e "${RED}sbx CLI missing. Install: brew trust docker/tap && brew install docker/tap/sbx${NC}"; return 1; }
+  sbx version || return 1
+  sbx ls >/dev/null 2>&1 \
+    || { echo -e "${RED}sbx not authenticated. Run: sbx login${NC}"; return 1; }
+  ensure_sbx_sandbox || return 1
+  echo -e "${CYAN}sbx check: claude + toolchain inside sandbox ...${NC}"
+  sbx exec "$SBX_NAME" claude --version || return 1
+  sbx exec "$SBX_NAME" bash -c \
+    'shellcheck --version >/dev/null && bats --version >/dev/null && cargo --version >/dev/null && echo "toolchain OK"' \
+    || return 1
+  echo -e "${CYAN}sbx check: egress policy ...${NC}"
+  # -f matters: the sandbox blocks by answering HTTP 403, which plain
+  # curl -s would report as success.
+  if sbx exec "$SBX_NAME" curl -sf -m 5 https://example.com >/dev/null 2>&1; then
+    echo -e "${YELLOW}WARN: network policy not enforced (example.com reachable)${NC}"
+  else
+    echo -e "${GREEN}egress blocked outside allowlist${NC}"
+  fi
+  if sbx exec "$SBX_NAME" curl -s -m 10 -o /dev/null https://api.anthropic.com; then
+    echo -e "${GREEN}api.anthropic.com reachable${NC}"
+  else
+    echo -e "${YELLOW}WARN: api.anthropic.com NOT reachable — check sbx policy${NC}"
+  fi
+  echo -e "${GREEN}sbx check OK${NC}"
+}
+
+run_claude_local() {
+  local iter_prompt="${PROMPT//ITER_NUM/$1}"
+  (cd "$WORKDIR" && claude "${CLAUDE_FLAGS[@]}" "$iter_prompt")
+}
+
+# Hardened sandbox run. The container sees ONLY the product repo (rw),
+# PRD.md (ro) and the prompt (ro) — no harness repo, no .env.local, no
+# ~/.claude. Auth is solely CLAUDE_CODE_OAUTH_TOKEN (value-less -e keeps
+# the token off this script's argv). Egress is locked to an allowlist by
+# the image entrypoint (NET_ADMIN/NET_RAW are needed only to raise the
+# firewall; claude itself runs unprivileged after the setpriv drop).
 run_claude_docker() {
   local iter_prompt="${PROMPT//ITER_NUM/$1}"
   local prompt_file
   prompt_file="$(mktemp)"
   printf '%s' "$iter_prompt" > "$prompt_file"
-  local host_uid host_gid
-  host_uid="$(id -u)"
-  host_gid="$(id -g)"
-  local workdir_name="$WORKDIR"
 
-  docker run --rm \
-    -v "$(pwd):/workspace" \
-    -v "$HOME/.claude:/home/node/.claude" \
-    -v "$prompt_file:/tmp/prompt.txt:ro" \
-    -w "/workspace/${workdir_name}" \
-    -e CLAUDE_CODE_OAUTH_TOKEN="${CLAUDE_CODE_OAUTH_TOKEN}" \
-    -e HOST_UID="$host_uid" \
-    -e HOST_GID="$host_gid" \
-    -e RALPH_WORKDIR="${workdir_name}" \
-    --network host \
-    node:24-bookworm-slim \
-    bash -c '
-      apt-get update -qq && apt-get install -y -qq \
-        git shellcheck bats gettext-base \
-        libwebkit2gtk-4.1-dev libglib2.0-dev libgtk-3-dev libssl-dev \
-        build-essential librsvg2-dev patchelf libsoup-3.0-dev \
-        libjavascriptcoregtk-4.1-dev curl wget >/dev/null 2>&1
-      # Install Rust stable for cargo check (required by S17+ GUI stories)
-      curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- \
-        --default-toolchain stable -y --no-modify-path >/dev/null 2>&1 || true
-      npm install -g @anthropic-ai/claude-code >/dev/null 2>&1
+  docker run --rm --init \
+    -v "$WORKDIR_HOST:/workspace" \
+    -v "$PRD_ABS:/PRD.md:ro" \
+    -v "$prompt_file:/prompt.txt:ro" \
+    -w /workspace \
+    -e CLAUDE_CODE_OAUTH_TOKEN \
+    -e CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \
+    -e RALPH_FIREWALL="${RALPH_FIREWALL:-on}" \
+    -e RALPH_NET_ALLOW_EXTRA="${RALPH_NET_ALLOW_EXTRA:-}" \
+    --cap-add NET_ADMIN --cap-add NET_RAW \
+    --security-opt no-new-privileges \
+    "$RALPH_IMAGE" "${CLAUDE_FLAGS[@]}"
 
-      RALPH_USER=node
-      RALPH_HOME=/home/node
-      if [ "$HOST_UID" != "$(id -u node)" ]; then
-        groupadd -g "$HOST_GID" ralph 2>/dev/null || true
-        useradd -u "$HOST_UID" -g "$HOST_GID" -d /home/ralph -s /bin/bash ralph 2>/dev/null || true
-        mkdir -p /home/ralph
-        cp -r /home/node/.claude /home/ralph/.claude 2>/dev/null || true
-        chown -R "$HOST_UID:$HOST_GID" /home/ralph 2>/dev/null || true
-        RALPH_USER=ralph
-        RALPH_HOME=/home/ralph
-      fi
-
-      su "$RALPH_USER" -c "git config --global init.defaultBranch main"
-      su "$RALPH_USER" -c "git config --global user.email \"david.moch@gmail.com\""
-      su "$RALPH_USER" -c "git config --global user.name \"David Moch\""
-      su "$RALPH_USER" -c "git config --global --add safe.directory /workspace"
-      su "$RALPH_USER" -c "git config --global --add safe.directory /workspace/$RALPH_WORKDIR"
-
-      cp /workspace/PRD.md /PRD.md 2>/dev/null || true
-      chmod 644 /PRD.md
-
-      export HOME="$RALPH_HOME"
-      # Make Rust available (installed above as root, link to user home)
-      if [ -d /root/.cargo/bin ]; then
-        mkdir -p "$RALPH_HOME/.cargo/bin"
-        cp -r /root/.cargo/bin/* "$RALPH_HOME/.cargo/bin/" 2>/dev/null || true
-        cp -r /root/.cargo/env "$RALPH_HOME/.cargo/env" 2>/dev/null || true
-        cp -r /root/.rustup "$RALPH_HOME/.rustup" 2>/dev/null || true
-        chown -R "$HOST_UID:$HOST_GID" "$RALPH_HOME/.cargo" "$RALPH_HOME/.rustup" 2>/dev/null || true
-      fi
-      cat /tmp/prompt.txt | su "$RALPH_USER" -c "PATH=\$HOME/.cargo/bin:\$PATH stdbuf -oL claude --dangerously-skip-permissions --verbose --output-format stream-json -p"
-    '
   rm -f "$prompt_file"
 }
 
@@ -518,7 +728,12 @@ show_dashboard() {
   iter_dur="$(( dur / 60 ))m $(( dur % 60 ))s"
 
   local new_commits
-  new_commits=$(git -C "$WORKDIR" log --oneline "$commit_before..HEAD" 2>/dev/null || true)
+  if [ -n "$commit_before" ]; then
+    new_commits=$(git -C "$WORKDIR" log --oneline "$commit_before..HEAD" 2>/dev/null || true)
+  else
+    # Fresh repo: no HEAD existed before this iteration — everything is new.
+    new_commits=$(git -C "$WORKDIR" log --oneline 2>/dev/null || true)
+  fi
 
   echo ""
   _top
@@ -556,6 +771,21 @@ show_dashboard() {
   echo ""
 }
 
+# ── Sandbox image (build-only / sbx-check modes exit here) ──
+if [ "$BUILD_ONLY" = true ]; then
+  ensure_docker_image --force
+  exit $?
+fi
+if [ "$SBX_CHECK" = true ]; then
+  sbx_check
+  exit $?
+fi
+if [ "$MODE" = "docker" ]; then
+  ensure_docker_image || exit 1
+elif [ "$MODE" = "sbx" ]; then
+  ensure_sbx_sandbox || exit 1
+fi
+
 # ── Banner ──
 echo -e "${CYAN}============================================${NC}"
 echo -e "${CYAN} Ralph Loop - F13 Shell Configurator${NC}"
@@ -564,7 +794,18 @@ echo -e "${CYAN} Working dir:    $WORKDIR/${NC}"
 echo -e "${CYAN} Read-only refs: ../core ../chat ../frontend${NC}"
 echo -e "${CYAN} Max iterations: $MAX_ITERATIONS${NC}"
 echo -e "${CYAN} Mode:           $MODE${NC}"
-echo -e "${CYAN} Discord:        ${RALPH_DISCORD_WEBHOOK:+enabled}${RALPH_DISCORD_WEBHOOK:-disabled}${NC}"
+if [ "$MODE" = "docker" ]; then
+  echo -e "${CYAN} Image:          $RALPH_IMAGE${NC}"
+  echo -e "${CYAN} Firewall:       ${RALPH_FIREWALL:-on}${NC}"
+elif [ "$MODE" = "sbx" ]; then
+  echo -e "${CYAN} Sandbox:        $SBX_NAME (template: $SBX_TEMPLATE)${NC}"
+fi
+budget_disp="unlimited"
+[ "${RALPH_MAX_BUDGET_CENTS:-0}" -gt 0 ] 2>/dev/null && budget_disp="$(fmt_cost "$RALPH_MAX_BUDGET_CENTS")"
+echo -e "${CYAN} Max turns:      ${RALPH_MAX_TURNS:-200}${NC}"
+echo -e "${CYAN} Permissions:    ${RALPH_PERMISSION_MODE:-bypass}${NC}"
+echo -e "${CYAN} Budget cap:     ${budget_disp}${NC}"
+echo -e "${CYAN} Discord:        $([ -n "${RALPH_DISCORD_WEBHOOK:-}" ] && echo enabled || echo disabled)${NC}"
 echo -e "${CYAN}============================================${NC}"
 
 # ── Discord: starting notification ──
@@ -603,10 +844,16 @@ if grep -q '## Pending Stories' "$WORKDIR/$PROGRESS" 2>/dev/null; then
 fi
 
 # ── Main loop ──
+build_claude_flags
+check_budget || exit 2
+
 while [ "$ITERATION" -lt "$MAX_ITERATIONS" ]; do
+  check_budget || exit 2
   ITERATION=$((ITERATION + 1))
   start_time=$(date +%s)
-  commit_before=$(git -C "$WORKDIR" rev-parse HEAD 2>/dev/null || echo "")
+  # -q --verify: plain "rev-parse HEAD" echoes the literal string "HEAD"
+  # to stdout on an unborn branch, which would poison the ..HEAD range.
+  commit_before=$(git -C "$WORKDIR" rev-parse -q --verify HEAD 2>/dev/null || true)
 
   echo ""
   echo -e "${YELLOW}==== Iteration $ITERATION / $MAX_ITERATIONS ====${NC}"
@@ -619,6 +866,8 @@ while [ "$ITERATION" -lt "$MAX_ITERATIONS" ]; do
 
   if [ "$MODE" = "docker" ]; then
     run_claude_docker "$ITERATION" 2>&1 | tee "$logfile" | USAGE_FILE="$usagefile" "$LIVE_FILTER"
+  elif [ "$MODE" = "sbx" ]; then
+    run_claude_sbx "$ITERATION" 2>&1 | tee "$logfile" | USAGE_FILE="$usagefile" "$LIVE_FILTER"
   else
     run_claude_local "$ITERATION" 2>&1 | tee "$logfile" | USAGE_FILE="$usagefile" "$LIVE_FILTER"
   fi

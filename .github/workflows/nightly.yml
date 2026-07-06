@@ -23,5 +23,5 @@ jobs:
       - name: Install shellcheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck
 
-      - name: shellcheck -S warning ralph*.sh
-        run: shellcheck -S warning --exclude=SC2034,SC2207 ralph*.sh
+      - name: shellcheck -S warning ralph*.sh docker/*.sh
+        run: shellcheck -S warning --exclude=SC2034,SC2207 ralph*.sh docker/*.sh
