@@ -27,5 +27,14 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
       | sh -s -- --default-toolchain stable -y --no-modify-path \
     && chmod -R a+w "$RUSTUP_HOME" "$CARGO_HOME"
 
+# Git identity for loop commits — without it, git commit fails with
+# "Author identity unknown" and the model invents its own identity.
+# Same identity as docker mode (ARG-overridable for forks).
+ARG GIT_USER_NAME="David Moch"
+ARG GIT_USER_EMAIL="david.moch@gmail.com"
+RUN git config --system init.defaultBranch main \
+    && git config --system user.name "$GIT_USER_NAME" \
+    && git config --system user.email "$GIT_USER_EMAIL"
+
 # Restore the base template's unprivileged user.
 USER agent

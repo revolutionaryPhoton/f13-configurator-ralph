@@ -851,7 +851,9 @@ while [ "$ITERATION" -lt "$MAX_ITERATIONS" ]; do
   check_budget || exit 2
   ITERATION=$((ITERATION + 1))
   start_time=$(date +%s)
-  commit_before=$(git -C "$WORKDIR" rev-parse HEAD 2>/dev/null || echo "")
+  # -q --verify: plain "rev-parse HEAD" echoes the literal string "HEAD"
+  # to stdout on an unborn branch, which would poison the ..HEAD range.
+  commit_before=$(git -C "$WORKDIR" rev-parse -q --verify HEAD 2>/dev/null || true)
 
   echo ""
   echo -e "${YELLOW}==== Iteration $ITERATION / $MAX_ITERATIONS ====${NC}"
