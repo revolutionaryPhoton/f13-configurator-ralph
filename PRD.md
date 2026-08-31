@@ -74,11 +74,12 @@ shellcheck -S warning bin/* lib/*.sh && bats tests/
 
 <optional longer description>
 
-Co-Authored-By: Claude Code
+Co-Authored-By: Claude Code, Opus 5
 ```
 
 Types: `ADD`, `RM`, `BF`, `NF`, `DOC`, `RF`. Every commit body ends with
-`Co-Authored-By: Claude Code`.
+`Co-Authored-By: <Agent>, <Model>` — name the harness **and** the exact
+model that wrote it, e.g. `Co-Authored-By: Claude Code, Opus 5`.
 
 ### PROGRESS.md Tracking
 

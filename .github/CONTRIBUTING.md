@@ -47,9 +47,10 @@ API credits.
    - **TYPE**: `ADD`, `RM`, `NF`, `BF`, `RF`, `DOC`
    - **scope**: `[ralph]`, `[prd]`, `[docs]`, `[repo]`, `[ci]`, etc.
    - **Only if** an AI coding agent (Claude Code, etc.) actually
-     wrote or co-authored the change, end the message with:
+     wrote or co-authored the change, end the message with the harness
+     **and** the specific model that wrote it:
      ```
-     Co-Authored-By: Claude Code
+     Co-Authored-By: Claude Code, Opus 5
      ```
      Hand-written commits should omit this trailer.
 5. **Open a PR**. Link the issue if any, describe what changed and

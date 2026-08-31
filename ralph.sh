@@ -128,7 +128,9 @@ Read /PRD.md for all rules. Key points:
 - Every new .sh file ships with at least one bats test.
 - F13 commit convention: <TYPE> [scope]: <description> (max 72 chars)
   Types: ADD, RM, BF, NF, DOC, RF
-- Every commit MUST end with: Co-Authored-By: Claude Code
+- Every commit MUST end with: Co-Authored-By: Claude Code, <model>
+  where <model> is the model you are running as (e.g. Opus 5, Sonnet 5).
+  Name the real model -- never leave the placeholder.
 - Update PROGRESS.md after every commit (see PRD for format).
 - Never modify files in ../core, ../chat, ../frontend -- read-only references.
 - Build everything in the current directory (/workspace inside Docker). Do NOT
@@ -256,7 +258,9 @@ RULES:
 - Only commit if ALL checks pass.
 - Commit message: <TYPE> [scope]: <description> (max 72 chars)
   Types: ADD, RM, BF, NF, DOC, RF
-  Every commit body MUST end with: Co-Authored-By: Claude Code
+  Every commit body MUST end with: Co-Authored-By: Claude Code, <model>
+  where <model> is the model you are running as (e.g. Opus 5, Sonnet 5).
+  Name the real model -- never leave the placeholder.
 - Update PROGRESS.md with detailed status after each commit (see PRD for format).
 - After each commit, check if README.md needs updating. If yes, update
   it in the same commit.
