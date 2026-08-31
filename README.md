@@ -113,7 +113,7 @@ Each iteration:
 3. Implements one story. Backpressure runs `shellcheck` + `bats` from the
    configurator's perspective.
 4. Commits locally with the F13 convention (`<TYPE> [scope]: ...` +
-   `Co-Authored-By: Claude Code`).
+   `Co-Authored-By: Claude Code, <model>`).
 5. Writes `ralph-logs/iteration-NNN.json` and `usage-NNN.json`.
 6. Optionally pings Discord.
 

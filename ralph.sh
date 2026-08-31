@@ -17,7 +17,7 @@ set -uo pipefail
 # Env knobs (see .env.example): RALPH_MAX_BUDGET_CENTS, RALPH_MAX_TURNS,
 # RALPH_PERMISSION_MODE, RALPH_IMAGE, RALPH_CLAUDE_CODE_VERSION,
 # RALPH_FIREWALL, RALPH_NET_ALLOW_EXTRA, RALPH_WORKDIR, RALPH_SBX_NAME,
-# RALPH_SBX_TEMPLATE
+# RALPH_SBX_TEMPLATE, RALPH_MODEL
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKDIR="${RALPH_WORKDIR:-configurator_v1}"
@@ -128,7 +128,9 @@ Read /PRD.md for all rules. Key points:
 - Every new .sh file ships with at least one bats test.
 - F13 commit convention: <TYPE> [scope]: <description> (max 72 chars)
   Types: ADD, RM, BF, NF, DOC, RF
-- Every commit MUST end with: Co-Authored-By: Claude Code
+- Every commit MUST end with: Co-Authored-By: Claude Code, <model>
+  where <model> is the model you are running as (e.g. Opus 5, Sonnet 5).
+  Name the real model -- never leave the placeholder.
 - Update PROGRESS.md after every commit (see PRD for format).
 - Never modify files in ../core, ../chat, ../frontend -- read-only references.
 - Build everything in the current directory (/workspace inside Docker). Do NOT
@@ -256,7 +258,9 @@ RULES:
 - Only commit if ALL checks pass.
 - Commit message: <TYPE> [scope]: <description> (max 72 chars)
   Types: ADD, RM, BF, NF, DOC, RF
-  Every commit body MUST end with: Co-Authored-By: Claude Code
+  Every commit body MUST end with: Co-Authored-By: Claude Code, MODEL_NAME
+  (the harness substitutes MODEL_NAME; if it still reads <model>, put the
+  model you are actually running as, e.g. Opus 5 -- never the placeholder.)
 - Update PROGRESS.md with detailed status after each commit (see PRD for format).
 - After each commit, check if README.md needs updating. If yes, update
   it in the same commit.
@@ -430,7 +434,78 @@ build_claude_flags() {
     bypass) CLAUDE_FLAGS+=(--dangerously-skip-permissions) ;;
     *)      CLAUDE_FLAGS+=(--permission-mode "$RALPH_PERMISSION_MODE") ;;
   esac
+  [ -n "${RALPH_MODEL:-}" ] && CLAUDE_FLAGS+=(--model "$RALPH_MODEL")
   CLAUDE_FLAGS+=(-p)
+}
+
+# ── Model attribution ──────────────────────────────────────────────────
+# The session model is authoritative ONLY in the stream's init event. A bare
+# grep for '"model"' also matches Claude Code's background Haiku sub-calls
+# (28 of them in one sampled iteration against 100 main-model ones) and would
+# silently misattribute commits to the wrong model.
+model_id_from_log() {
+  [ -f "${1:-}" ] || return 1
+  grep -o '"subtype":"init".*' "$1" 2>/dev/null | head -1 \
+    | grep -o '"model":"[^"]*"' | head -1 | cut -d'"' -f4
+}
+
+# claude-opus-5 -> "Opus 5" | claude-sonnet-4-6 -> "Sonnet 4.6"
+# claude-haiku-4-5-20251001 -> "Haiku 4.5" (trailing date build is dropped)
+model_display_name() {
+  [ -n "${1:-}" ] || return 1
+  printf '%s' "$1" | awk -F- '{
+    fam=$2; ver="";
+    for (i=3;i<=NF;i++) { if ($i ~ /^[0-9]{8}$/) continue;
+      ver = (ver=="" ? $i : ver "." $i) }
+    printf "%s%s%s", toupper(substr(fam,1,1)) substr(fam,2), (ver==""?"":" "), ver
+  }'
+}
+
+# Best-known display name for prompt injection: an explicit full-id pin wins,
+# otherwise learn it from the newest existing iteration log. Aliases such as
+# RALPH_MODEL=opus resolve to an exact version only at run time, so those fall
+# through to the post-iteration verify below.
+RALPH_MODEL_DISPLAY=""
+resolve_model_display() {
+  case "${RALPH_MODEL:-}" in
+    claude-*) RALPH_MODEL_DISPLAY="$(model_display_name "$RALPH_MODEL")"; return 0 ;;
+  esac
+  local last id
+  last=$(ls -1 "$WORKDIR/$LOGDIR"/iteration-*.json 2>/dev/null | tail -1)
+  [ -n "$last" ] || return 0
+  id="$(model_id_from_log "$last")" || return 0
+  [ -n "$id" ] && RALPH_MODEL_DISPLAY="$(model_display_name "$id")"
+  return 0
+}
+
+# Per-iteration prompt: iteration number + the resolved model label.
+iter_prompt_for() {
+  local p="${PROMPT//ITER_NUM/$1}"
+  printf '%s' "${p//MODEL_NAME/${RALPH_MODEL_DISPLAY:-<model>}}"
+}
+
+# Ground-truth check on the commits this iteration produced. The loop never
+# pushes, so anything wrong here is still locally fixable -- we report instead
+# of rewriting history mid-run.
+verify_trailers() {
+  local before="$1" want="$2" range sha bad=0 total=0
+  [ -n "$want" ] || return 0
+  if [ -n "$before" ]; then range="$before..HEAD"; else range="HEAD"; fi
+  for sha in $(git -C "$WORKDIR" log --format='%H' "$range" 2>/dev/null); do
+    total=$((total + 1))
+    if ! git -C "$WORKDIR" log -1 --format='%B' "$sha" 2>/dev/null \
+         | grep -q "^Co-Authored-By: Claude Code, $want\$"; then
+      echo -e "${YELLOW} trailer WARN ${sha:0:7} does not name '$want'${NC}"
+      bad=$((bad + 1))
+    fi
+  done
+  [ "$total" -eq 0 ] && return 0
+  if [ "$bad" -eq 0 ]; then
+    echo -e "${GREEN} trailers OK - $total commit(s) attributed to $want${NC}"
+  else
+    echo -e "${YELLOW} $bad/$total commit(s) mis-attributed; fix before pushing${NC}"
+  fi
+  return 0
 }
 
 # Cumulative cost in cents across every usage-*.json in the log dir
@@ -573,7 +648,7 @@ ensure_sbx_sandbox() {
 }
 
 run_claude_sbx() {
-  local iter_prompt="${PROMPT//ITER_NUM/$1}"
+  local iter_prompt; iter_prompt="$(iter_prompt_for "$1")"
   # Workspaces mount at the host path, so /PRD.md does not exist in sbx
   # mode — point the prompt at the staged copy instead.
   iter_prompt="${iter_prompt///PRD.md/$SBX_PRD_DIR/PRD.md}"
@@ -617,7 +692,7 @@ sbx_check() {
 }
 
 run_claude_local() {
-  local iter_prompt="${PROMPT//ITER_NUM/$1}"
+  local iter_prompt; iter_prompt="$(iter_prompt_for "$1")"
   (cd "$WORKDIR" && claude "${CLAUDE_FLAGS[@]}" "$iter_prompt")
 }
 
@@ -628,7 +703,7 @@ run_claude_local() {
 # the image entrypoint (NET_ADMIN/NET_RAW are needed only to raise the
 # firewall; claude itself runs unprivileged after the setpriv drop).
 run_claude_docker() {
-  local iter_prompt="${PROMPT//ITER_NUM/$1}"
+  local iter_prompt; iter_prompt="$(iter_prompt_for "$1")"
   local prompt_file
   prompt_file="$(mktemp)"
   printf '%s' "$iter_prompt" > "$prompt_file"
@@ -804,6 +879,7 @@ budget_disp="unlimited"
 [ "${RALPH_MAX_BUDGET_CENTS:-0}" -gt 0 ] 2>/dev/null && budget_disp="$(fmt_cost "$RALPH_MAX_BUDGET_CENTS")"
 echo -e "${CYAN} Max turns:      ${RALPH_MAX_TURNS:-200}${NC}"
 echo -e "${CYAN} Permissions:    ${RALPH_PERMISSION_MODE:-bypass}${NC}"
+echo -e "${CYAN} Model:          ${RALPH_MODEL:-cli default}${RALPH_MODEL_DISPLAY:+ (trailer: $RALPH_MODEL_DISPLAY)}${NC}"
 echo -e "${CYAN} Budget cap:     ${budget_disp}${NC}"
 echo -e "${CYAN} Discord:        $([ -n "${RALPH_DISCORD_WEBHOOK:-}" ] && echo enabled || echo disabled)${NC}"
 echo -e "${CYAN}============================================${NC}"
@@ -845,6 +921,7 @@ fi
 
 # ── Main loop ──
 build_claude_flags
+resolve_model_display
 check_budget || exit 2
 
 while [ "$ITERATION" -lt "$MAX_ITERATIONS" ]; do
@@ -872,6 +949,15 @@ while [ "$ITERATION" -lt "$MAX_ITERATIONS" ]; do
     run_claude_local "$ITERATION" 2>&1 | tee "$logfile" | USAGE_FILE="$usagefile" "$LIVE_FILTER"
   fi
   OUTPUT=$(cat "$logfile")
+
+  # Ground truth for THIS iteration, recorded next to the log and reused as
+  # the injected label for the next one.
+  iter_model_id="$(model_id_from_log "$logfile" || true)"
+  if [ -n "$iter_model_id" ]; then
+    printf '%s\n' "$iter_model_id" > "$WORKDIR/$LOGDIR/model-${iter_num}.txt"
+    RALPH_MODEL_DISPLAY="$(model_display_name "$iter_model_id")"
+    verify_trailers "$commit_before" "$RALPH_MODEL_DISPLAY"
+  fi
 
   patch_progress_cost
   show_dashboard
