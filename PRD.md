@@ -1958,6 +1958,190 @@ That means:
 
 ---
 
+### Phase 17: Upstream re-baseline — core v3.0.0 + chat v3.0.0
+
+**Priority Zero.** Everything the configurator generates is pinned to
+upstream refs that are now two majors stale. Phases 11–16 all build on
+templates this phase rewrites, so this ships first. **Target release:
+v0.6.0.**
+
+**This is a port, not a version bump.** The single most important fact:
+
+> **In core v3.0.0 the `core` service is no longer an F13 image.**
+> It is `apache/apisix:3.15.0-ubuntu` — a file-configured API gateway.
+> `grep -c 'microservices/core'` in core v3.0.0's own `docker-compose.yml`
+> returns **0**. The monolithic core app has been dissolved; APISIX routes
+> to the individual services.
+
+Authoritative version set (from the F13 compatibility matrix,
+`dokumentation/docs/nutzen/releases.md`, Stand 31.08.2026):
+
+| Component | Pin | Note |
+|---|---|---|
+| core (gateway) | `apache/apisix:3.15.0-ubuntu` | FastAPI legacy variant exists as fallback |
+| frontend | `frontend` @ **v3.0.1** | Svelte frontend; patched-build pattern retained |
+| chat | `chat:v3.0.0` | matrix-confirmed against core v3.0.0 |
+| **opa** | `opa:1.18.1-debug` | **MANDATORY — chat v3 will not start without it** |
+| feedback | `feedback:v1.0.0` | matrix-tested pairing (v1.0.1 exists, untested with core v3.0.0) |
+| feedback-db | `postgres:18-alpine` | was 17; upstream raised it |
+| ollama-mock | `builder-images/ollama-mock:v1.2.2` | path AND tag changed |
+
+Explicitly **out of scope** for this phase (maintainer decision): RAG,
+summary, parser, transcription, inference-adapter, tusd, rustfs,
+elasticsearch, cohere reranker. Minimal stack only.
+
+**Startup-fatal breaking changes** (from the matrix + `chat/docs/migration.md`).
+These are not cosmetic — the service refuses to boot:
+
+1. `service_endpoints.opa` **must** exist in chat's `general.yml`.
+2. Any leftover `tools.<tool>.role` entry in `agentic_chat.yml` **prevents
+   startup** — tool permissions moved to OPA policy.
+3. `context_length` **replaces** `max_context_tokens`, and now covers input
+   *and* output. The configurator currently ships `CHAT_MAX_CONTEXT_TOKENS`
+   in `env.tmpl`.
+4. `prompt_maps.yml` format reworked (both core and chat).
+5. Feedback-DB postgres 17 → 18. Fresh configurator stacks create a new
+   volume, so no data migration is needed — but the image pin must move.
+
+**Loop capability note.** The sandbox has **no Docker** and cannot run
+`compose up`, so no story in this phase may claim "verified working" from
+inside the loop. `RALPH_NET_ALLOW_EXTRA="gitlab.opencode.de"` grants the
+loop anonymous read access to upstream (single static IP, no credentials),
+so it **can and must** fetch real config files rather than inventing them.
+**Never hand-write an upstream schema from memory — fetch it.**
+
+**Branch + PR workflow:** single feature branch `feat/phase17-rebaseline`,
+single Phase 17 PR.
+
+- [ ] **S121: Vendor upstream reference configs**
+
+  Fetch the authoritative v3 configs into `docs/upstream/` so every later
+  story diffs against ground truth instead of guessing:
+
+  ```
+  git clone --depth 1 --branch v3.0.0 https://gitlab.opencode.de/f13/microservices/core.git
+  git clone --depth 1 --branch v3.0.0 https://gitlab.opencode.de/f13/microservices/chat.git
+  ```
+
+  Copy into `docs/upstream/v3/core/` and `docs/upstream/v3/chat/`:
+  `general.yml`, `llm_models.yml`, `prompt_maps.yml`, `agentic_chat.yml`,
+  the `configs/apisix/` tree (core), the `opa/policies/` tree (chat), and
+  `docs/migration.md` (chat). Commit them — they are the reference the rest
+  of the phase is checked against, and they must survive without network.
+
+  Add `docs/upstream/README.md` recording the exact tags and fetch date.
+
+  **Loop-runnable.** Acceptance: files present, non-empty, and
+  `docs/upstream/README.md` names the tags.
+
+- [ ] **S122: Compose template — core becomes an APISIX gateway**
+
+  Rewrite the `core` service in `templates/docker-compose.yml.tmpl`:
+  image `apache/apisix:3.15.0-ubuntu`, `APISIX_STAND_ALONE=true`,
+  `APISIX_PROFILE=guest`, `CORS_ALLOW_ORIGINS`, and read-only mounts of the
+  four `configs/apisix/*.yaml` files. Generate those four files into
+  `generated/configs/apisix/` from the vendored reference, templating only
+  what the wizard actually varies (ports, CORS origin).
+
+  Drop the `CORE_IMAGE` / `core:v2.0.0` pin and every assumption that core
+  is an F13 image.
+
+  **Loop-runnable.** Acceptance: rendered compose has no
+  `microservices/core` reference; bats asserts the four apisix files render
+  and are valid YAML.
+
+- [ ] **S123: Compose template — add the mandatory OPA service**
+
+  Add an `opa` service: image `opa:1.18.1-debug`, command
+  `run --server --addr=:8181 --watch --set=decision_logs.console=true /policies`,
+  `./opa/policies` mounted read-only, healthcheck `["CMD","/opa","eval","1"]`.
+  Ship the policy set from the vendored chat reference into
+  `generated/opa/policies/`. Chat must `depends_on` opa with
+  `condition: service_healthy`.
+
+  **Loop-runnable.** Acceptance: bats asserts the opa service renders with
+  the policy mount and chat depends on it.
+
+- [ ] **S124: Compose template — feedback service, postgres 18, ollama-mock**
+
+  Add the `feedback` service (`feedback:v1.0.0`, depends on a healthy
+  `feedback-db`, `feedback_db.secret` mounted, `./configs` volume). Bump
+  `feedback-db` to `postgres:18-alpine`. Correct the ollama-mock image to
+  `builder-images/ollama-mock:v1.2.2` (both the path and the tag changed).
+
+  **Loop-runnable.** Acceptance: bats asserts all three.
+
+- [ ] **S125: chat config templates — the startup-fatal three**
+
+  In `templates/chat/`:
+  - `general.yml.tmpl`: add `service_endpoints.opa: http://opa:8181/`.
+  - `llm_models.yml.tmpl`: rename `max_context_tokens` → `context_length`,
+    and update the comment to say it covers input *and* output.
+  - new `agentic_chat.yml.tmpl`: port from the vendored reference, with
+    **zero** `tools.<tool>.role` entries.
+  - `prompt_maps.yml`: re-derive from the vendored v3 reference.
+
+  **Loop-runnable.** Acceptance: bats asserts the opa endpoint is present,
+  that `max_context_tokens` appears nowhere in rendered chat config, and
+  that no `role:` key exists under `tools.` in `agentic_chat.yml`.
+
+- [ ] **S126: core config templates — v3 schema**
+
+  In `templates/core/`: update `general.yml.tmpl` `service_endpoints`
+  (`transcription_inference` is gone; `inference-adapter` / `inference`
+  replace it — omit both, since transcription is out of scope), drop the
+  removed `active_llms.embedding` key, add `llm_api_timeout: 180`.
+  Re-derive `llm_models.yml.tmpl` from the vendored reference.
+
+  **Loop-runnable.** Acceptance: every key in the rendered core config
+  exists in `docs/upstream/v3/core/general.yml` — assert this in bats
+  rather than eyeballing it.
+
+- [ ] **S127: env + wizard surface**
+
+  `env.tmpl`: rename `CHAT_MAX_CONTEXT_TOKENS` → `CHAT_CONTEXT_LENGTH`,
+  drop `CORE_IMAGE`, add `OPA_PORT` (default 8181) and `FEEDBACK_PORT`
+  if exposed. Update `lib/` and `bin/f13-config` prompts, `.state`
+  read/write, and the GUI's Chat settings label so the rename is
+  end-to-end. Migrate any existing `.state` key on read.
+
+  **Loop-runnable.** Acceptance: `grep -r CHAT_MAX_CONTEXT_TOKENS` returns
+  nothing outside `docs/`; bats covers the `.state` migration path.
+
+- [ ] **S128: frontend pin bump to v3.0.1 + patch re-derivation**
+
+  Bump `_FRONTEND_GIT_REF` to `v3.0.1` (image tag becomes
+  `f13-frontend:v3.0.1_based`). Re-derive the S16 feature-gating patches
+  against the v3.0.1 source — the v2.0.0 patches are very unlikely to apply
+  cleanly. If a patch cannot be re-derived mechanically, **stop and record
+  the mismatch in `docs/frontend-patch-notes.md` rather than forcing it.**
+
+  **Loop-runnable for the ref bump and the patch attempt; maintainer-driven
+  if the patches do not apply.** The loop cannot build the image (no Docker),
+  so "patches apply" is the acceptance bar, not "image builds".
+
+- [ ] **S129: Backpressure + regression sweep**
+
+  `shellcheck -S warning bin/* lib/*.sh` clean, full `bats tests/` green,
+  and every new template covered by at least one bats case. Update
+  `README.md` + `docs/` to describe the new topology (APISIX core, OPA,
+  feedback) and the minimal-stack scope.
+
+  **Loop-runnable.**
+
+- [ ] **S130: Maintainer smoke — does the stack actually boot?**
+
+  **Maintainer-driven. The loop structurally cannot do this** — no Docker
+  in the sandbox. On the host: generate a stack, `docker compose up`, and
+  confirm (a) APISIX starts and routes, (b) chat starts with OPA reachable,
+  (c) feedback + postgres 18 come up healthy, (d) the patched frontend
+  serves and can reach chat through the gateway.
+
+  Expect findings. The most likely: APISIX's route config references
+  upstreams we deliberately omitted (rag/summary/transcription). Record
+  whatever breaks in `PROGRESS.md` as follow-up stories rather than
+  hot-fixing blind.
+
 ## Release roadmap
 
 The PRD's story sequence maps onto the GitHub release line as follows:
@@ -1973,12 +2157,13 @@ The PRD's story sequence maps onto the GitHub release line as follows:
 | v0.3.2 | **HF2 + HF3 + tauri 2.11.1** — Cancel kills wizard subprocess; missing-image precondition; Dependabot bump | shipped | HF2 plumbed `AbortSignal` end-to-end with a double-down mitigation for the orphaned `docker compose up` grandchild (proper kill-process-group fix deferred). HF3 pinned `pull_policy: never` on the frontend service and added a `docker image inspect` precondition in `compose::up` with the failure reason propagated through `COMPOSE_ERROR_MESSAGE` into the `done` event so the GUI's toast surfaces the friendly text. Tauri 2.10.3 → 2.11.1 via Dependabot #2 (Cargo.lock only). PR #3 squashed as `69f9bff`. Ralph loop NOT used. |
 | v0.4.0 | **Phase 9 (S41–S44)** GUI localization + zoom | shipped | English / German / French / Spanish translations of every GUI string (176 keys × 4 locales, key parity enforced in CI); locale picker on the welcome screen only, persisted to `f13.configurator.locale`; zoom via `Ctrl/Cmd + +/−/0` shortcuts and a `−` / `100%` / `+` stepper in Settings → Appearance, factor persisted to `f13.configurator.zoom`. Shell wizard terminal output stays English. Ralph loop drove S41–S44; maintainer review added the LS key rename + Settings absence test + localization gaps in the Ollama prose / ports note / reset modal as follow-ups. PR #4 squashed as `dc3d10f`. |
 | v0.5.0 | **Phase 10 (S51–S56)** Signed distributables + bundled-mode data paths | planned | `appLocalDataDir` for bundled installs (replaces dev-only path), `f13-stop`/`f13-reset` discovery, signed `.dmg` (macOS arm64 only), `.AppImage` + `.deb` (Linux x86_64 only), GitHub Releases automation with draft + manual publish. Feature branch `feat/phase10-distributables`, single PR. S51 + S52 loop-runnable; S53–S56 maintainer-driven (Apple cert, GitHub release secrets). |
-| v0.6.0 | **Phase 11 (S61 + S62)** UX polish + auto-update | planned | S61: auto-regenerate broken stack on Start instead of forcing user through Reconfigure wizard (former HF5, promoted to a real story since it's pure GUI plumbing). S62: optional Tauri auto-update with separate updater keypair and signed manifest in the GitHub Release (former S57). Feature branch `feat/phase11-polish-autoupdate`, single PR. |
-| v0.7.0 | **Phase 12 (S71–S73)** Homebrew distribution | planned | macOS users can `brew install --cask f13-configurator` from a maintainer-owned tap (`revolutionaryPhoton/homebrew-f13`). GitHub Releases remain the canonical artifact source. S73 (release-workflow integration to auto-bump the cask formula) is optional. Feature branch `feat/phase12-homebrew`, single PR. |
-| v0.8.0 | **Phase 13 (S81–S86)** Full preset — RAG + summary + parser | planned | New `full` preset alongside today's `basic`. RAG, summary, parser services templated and gated by Compose profiles + `ENABLED_FEATURES`. Ollama picker grows an embedding-model selection when RAG is in the preset. Preflight learns to estimate per-service RAM/disk against host resources. Single preset radio (basic / full), no per-service toggles yet. Transcription explicitly deferred. Feature branch `feat/phase13-full-preset`, single PR. Mostly loop-runnable; S81 (upstream catalog research) is maintainer-driven. |
-| v0.9.0 | **Phase 14 (S91–S94)** User-adjustable microservice set | planned | Replace the basic/full radio with a checkbox grid — users mix and match services. Live resource estimation as toggles flip. Dependency enforcement (RAG → embedding model on Ollama path, summary → parser as a hard dependency auto-ticked, parser standalone is fine, chat always required). `COMPOSE_PROFILES` + `ENABLED_FEATURES` derived from the selection. Pure UX layer on Phase 13's templates. Feature branch `feat/phase14-adjustable-services`, single PR. Fully loop-runnable. |
-| v0.10.0 | **Phase 15 (S101–S103)** Chat parameter tuning | planned | System prompt, temperature, max input/output tokens exposed in Settings → Chat (GUI) and an optional `--edit-chat-params` flow (shell). Persists to `.state`; chat service restarts on save. No new services, no upstream coordination. Smallest post-distribution phase. Feature branch `feat/phase15-chat-params`, single PR. Fully loop-runnable. |
-| v0.11.0 | **Phase 16 (S111–S115)** Branding / text customization | planned | Logo + favicon upload, color palette picker, text-string overrides — all wired through the existing S16 patched-frontend-build mechanism (no upstream F13 cooperation available, per 2026-05 maintainer decision). Every branding change triggers a ~1–3 min frontend rebuild. Tightly coupled to the pinned `_FRONTEND_GIT_REF`; each upstream frontend bump needs a branding-regression smoke-test. Feature branch `feat/phase16-branding`, single PR. Loop-runnable for wiring; S111 (surface inventory) maintainer-driven. |
+| **v0.6.0** | **Phase 17 (S121–S130)** Upstream re-baseline | **next** | **Priority Zero — preempts Phases 11–16, which each shift one minor later.** core v2.0.0 → APISIX gateway (`apache/apisix:3.15.0-ubuntu`; the core app image no longer exists in v3's deployment), chat v1.2.0 → v3.0.0, mandatory OPA sidecar (chat v3 refuses to start without `service_endpoints.opa`), feedback service added, postgres 17 → 18, ollama-mock path+tag corrected, frontend ref v2.0.0 → v3.0.1 with S16 patches re-derived. Minimal stack only — RAG/summary/parser/transcription explicitly out of scope. Loop-runnable except S130 (stack smoke), which needs Docker the sandbox does not have. Feature branch `feat/phase17-rebaseline`, single PR. |
+| v0.7.0 | **Phase 11 (S61 + S62)** UX polish + auto-update | planned | S61: auto-regenerate broken stack on Start instead of forcing user through Reconfigure wizard (former HF5, promoted to a real story since it's pure GUI plumbing). S62: optional Tauri auto-update with separate updater keypair and signed manifest in the GitHub Release (former S57). Feature branch `feat/phase11-polish-autoupdate`, single PR. |
+| v0.8.0 | **Phase 12 (S71–S73)** Homebrew distribution | planned | macOS users can `brew install --cask f13-configurator` from a maintainer-owned tap (`revolutionaryPhoton/homebrew-f13`). GitHub Releases remain the canonical artifact source. S73 (release-workflow integration to auto-bump the cask formula) is optional. Feature branch `feat/phase12-homebrew`, single PR. |
+| v0.9.0 | **Phase 13 (S81–S86)** Full preset — RAG + summary + parser | planned | New `full` preset alongside today's `basic`. RAG, summary, parser services templated and gated by Compose profiles + `ENABLED_FEATURES`. Ollama picker grows an embedding-model selection when RAG is in the preset. Preflight learns to estimate per-service RAM/disk against host resources. Single preset radio (basic / full), no per-service toggles yet. Transcription explicitly deferred. Feature branch `feat/phase13-full-preset`, single PR. Mostly loop-runnable; S81 (upstream catalog research) is maintainer-driven. |
+| v0.10.0 | **Phase 14 (S91–S94)** User-adjustable microservice set | planned | Replace the basic/full radio with a checkbox grid — users mix and match services. Live resource estimation as toggles flip. Dependency enforcement (RAG → embedding model on Ollama path, summary → parser as a hard dependency auto-ticked, parser standalone is fine, chat always required). `COMPOSE_PROFILES` + `ENABLED_FEATURES` derived from the selection. Pure UX layer on Phase 13's templates. Feature branch `feat/phase14-adjustable-services`, single PR. Fully loop-runnable. |
+| v0.11.0 | **Phase 15 (S101–S103)** Chat parameter tuning | planned | System prompt, temperature, max input/output tokens exposed in Settings → Chat (GUI) and an optional `--edit-chat-params` flow (shell). Persists to `.state`; chat service restarts on save. No new services, no upstream coordination. Smallest post-distribution phase. Feature branch `feat/phase15-chat-params`, single PR. Fully loop-runnable. |
+| v0.12.0 | **Phase 16 (S111–S115)** Branding / text customization | planned | Logo + favicon upload, color palette picker, text-string overrides — all wired through the existing S16 patched-frontend-build mechanism (no upstream F13 cooperation available, per 2026-05 maintainer decision). Every branding change triggers a ~1–3 min frontend rebuild. Tightly coupled to the pinned `_FRONTEND_GIT_REF`; each upstream frontend bump needs a branding-regression smoke-test. Feature branch `feat/phase16-branding`, single PR. Loop-runnable for wiring; S111 (surface inventory) maintainer-driven. |
 
 Linux runtime parity (Phase 8) shipped in v0.3.0 via
 maintainer-side WSL2 testing. HF4 landed as v0.3.1; HF2 + HF3
@@ -2006,8 +2191,9 @@ rebrand F13 by patching the upstream frontend image with custom
 logo, colors, and text strings at build time — the only viable
 path since F13's frontend doesn't support runtime overrides
 (v0.11.0). Transcription is explicitly out of scope across all
-these phases; if there's demand, a future Phase 17 "specialty
-services" bucket would pick it up.
+these phases; if there's demand, a future Phase 18 "specialty
+services" bucket would pick it up (Phase 17 is the upstream
+re-baseline).
 
 ---
 
