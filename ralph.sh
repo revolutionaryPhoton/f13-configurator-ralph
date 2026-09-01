@@ -132,7 +132,11 @@ Read /PRD.md for all rules. Key points:
   where <model> is the model you are running as (e.g. Opus 5, Sonnet 5).
   Name the real model -- never leave the placeholder.
 - Update PROGRESS.md after every commit (see PRD for format).
-- Never modify files in ../core, ../chat, ../frontend -- read-only references.
+- ../core, ../chat, ../frontend are NOT mounted in the sandbox -- do not
+  look for them. Upstream F13 sources must be FETCHED:
+    git clone --depth 1 --branch <tag> https://gitlab.opencode.de/f13/microservices/<repo>.git
+  (anonymous read, allowed by RALPH_NET_ALLOW_EXTRA). Never hand-write an
+  upstream config schema from memory -- fetch the real file and diff.
 - Build everything in the current directory (/workspace inside Docker). Do NOT
   create a subdirectory for the project.
 - Keycloak: guest mode on core (authentication.guest_mode: true) and
@@ -264,7 +268,9 @@ RULES:
 - Update PROGRESS.md with detailed status after each commit (see PRD for format).
 - After each commit, check if README.md needs updating. If yes, update
   it in the same commit.
-- Never modify files in ../core, ../chat, ../frontend.
+- ../core, ../chat, ../frontend are NOT mounted -- fetch upstream instead:
+  git clone --depth 1 --branch <tag> https://gitlab.opencode.de/f13/microservices/<repo>.git
+  Never invent an upstream schema from memory; fetch it and diff.
 - Git remote: https://github.com/revolutionaryPhoton/f13-configurator.git
   (origin/main). DO NOT git push — the user pushes manually after review.
   Just commit locally.
