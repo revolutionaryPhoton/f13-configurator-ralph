@@ -13,6 +13,7 @@ BOLD='\033[1m'
 NC='\033[0m'
 
 # Token accumulators
+model_id=""
 total_input=0
 total_output=0
 total_cache_read=0
@@ -27,6 +28,12 @@ extract() {
 }
 
 while IFS= read -r line; do
+  # Authoritative session model, from the init event only. A bare grep for
+  # '"model"' also matches background Haiku sub-calls and would pick the
+  # wrong rate card.
+  if [ -z "$model_id" ] && printf '%s' "$line" | grep -q '"subtype":"init"'; then
+    model_id=$(printf '%s' "$line" | grep -o '"model":"[^"]*"' | head -1 | cut -d'"' -f4)
+  fi
   [ -z "$line" ] && continue
 
   type=$(echo "$line" | grep -o '"type":"[^"]*"' | head -1 | cut -d'"' -f4)
@@ -107,12 +114,31 @@ while IFS= read -r line; do
 done
 
 # ── Write usage summary ──
-# Opus pricing (per 1M tokens): input $15, output $75, cache_read $1.50, cache_create $3.75
+# Per-model rate card, selected from the model the stream actually reported.
+# This used to hardcode Opus rates, which was wrong twice over: it priced
+# Sonnet runs as Opus, AND the numbers were the retired $15/$75 Opus 3/4 card
+# rather than current Opus 5. A Sonnet iteration came out ~6x too expensive,
+# and RALPH_MAX_BUDGET_CENTS inherited the same error -- aborting runs early
+# against spend that never happened.
+#
+# Rates are hundredths of a cent per 1M tokens (so $15.00/M -> 1500).
+# cache_read = 0.1x input, cache_create (5m TTL) = 1.25x input.
+case "${model_id:-}" in
+  *fable*)      r_in=1000; r_out=5000; r_cr=100;  r_cc=1250; price_label="Fable 5" ;;
+  *opus*)       r_in=500;  r_out=2500; r_cr=50;   r_cc=625;  price_label="Opus 5" ;;
+  *sonnet-4-6*) r_in=300;  r_out=1500; r_cr=30;   r_cc=375;  price_label="Sonnet 4.6" ;;
+  *sonnet*)     r_in=200;  r_out=1000; r_cr=20;   r_cc=250;  price_label="Sonnet 5" ;;
+  *haiku*)      r_in=100;  r_out=500;  r_cr=10;   r_cc=125;  price_label="Haiku 4.5" ;;
+  # Unknown/absent model: fall back to the most expensive current card so a
+  # budget cap errs toward stopping early rather than overspending silently.
+  *)            r_in=1000; r_out=5000; r_cr=100;  r_cc=1250; price_label="unknown model, Fable 5 rates" ;;
+esac
+
 # Calculate cost in cents to avoid floating point in bash
-cost_input=$(( total_input * 1500 / 1000000 ))
-cost_output=$(( total_output * 7500 / 1000000 ))
-cost_cache_read=$(( total_cache_read * 150 / 1000000 ))
-cost_cache_create=$(( total_cache_create * 375 / 1000000 ))
+cost_input=$(( total_input * r_in / 1000000 ))
+cost_output=$(( total_output * r_out / 1000000 ))
+cost_cache_read=$(( total_cache_read * r_cr / 1000000 ))
+cost_cache_create=$(( total_cache_create * r_cc / 1000000 ))
 cost_total=$(( cost_input + cost_output + cost_cache_read + cost_cache_create ))
 
 cat > "$USAGE_FILE" << EOJSON
@@ -121,6 +147,7 @@ cat > "$USAGE_FILE" << EOJSON
   "output_tokens": $total_output,
   "cache_read_input_tokens": $total_cache_read,
   "cache_creation_input_tokens": $total_cache_create,
+  "model": "${model_id:-unknown}",
   "cost_cents": $cost_total,
   "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
@@ -133,6 +160,7 @@ printf "${BOLD}  Tokens:${NC}  input %sK | output %sK | cache_read %sM | cache_c
   "$(( total_output / 1000 ))" \
   "$(( total_cache_read / 1000000 ))" \
   "$(( total_cache_create / 1000 ))"
-printf "${BOLD}  Cost:${NC}    \$%d.%02d (Opus API pricing)\n" \
+printf "${BOLD}  Cost:${NC}    \$%d.%02d (%s API pricing)\n" \
   "$(( cost_total / 100 ))" \
-  "$(( cost_total % 100 ))"
+  "$(( cost_total % 100 ))" \
+  "$price_label"
