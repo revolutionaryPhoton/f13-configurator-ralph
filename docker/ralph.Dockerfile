@@ -2,12 +2,12 @@
 # Prebuilt Ralph loop sandbox image. Build via ./ralph.sh --build
 # All toolchain deps are baked here so iterations start in seconds and the
 # supply chain is pinned instead of re-fetched every iteration.
-ARG NODE_IMAGE=node:24-bookworm-slim@sha256:b31e7a42fdf8b8aa5f5ed477c72d694301273f1069c5a2f71d53c6482e99a2fc
+ARG NODE_IMAGE=node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e
 FROM ${NODE_IMAGE}
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-ARG CLAUDE_CODE_VERSION=2.1.201
+ARG CLAUDE_CODE_VERSION=2.1.252
 ARG UID=501
 ARG GID=20
 ARG GIT_USER_NAME="David Moch"
