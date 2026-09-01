@@ -161,28 +161,45 @@ Read /PRD.md for all rules. Key points:
 - S41–S44: Phase 9 GUI i18n + zoom (complete, shipped v0.4.0 — loop-driven).
 - HF1 / HF2 / HF3 / HF4: maintainer hand-fixes (v0.2.2 / v0.3.2 / v0.3.2 / v0.3.1).
 
-### Current loop target: Phase 10 loop-runnable subset → v0.5.0
+### Current loop target: Phase 17 upstream re-baseline → v0.6.0
 
-Active stories: **S51 + S52** — see PROGRESS.md "Pending Stories
-— Phase 10". S51 lands first (Rust path resolution for bundled
-installs); S52 builds on it (shell-script discovery).
+Active stories: **S121–S129** — see PRD.md "Phase 17" and
+PROGRESS.md "Pending Stories — Phase 17". Work them IN ORDER;
+S121 (vendor upstream reference configs) MUST land first because
+every later story diffs against what it fetches.
 
-Stories S53–S56 ship in the same Phase 10 PR but are maintainer-
-driven (Apple cert + GitHub release secrets). Do NOT attempt them.
-Drafting release.yml YAML skeleton is OK; wiring secrets is not.
+Read the whole Phase 17 section of /PRD.md before starting. It
+specifies the target stack deliberately — do NOT redesign it.
 
-Feature branch: feat/phase10-distributables. Single Phase 10 PR
-rolls everything up at the end.
+Critical facts you must not re-derive from memory:
+- In core v3.0.0 the `core` service is `apache/apisix:3.15.0-ubuntu`,
+  NOT an F13 image. The core app image is gone from the deployment.
+- chat v3.0.0 REQUIRES an OPA sidecar. Missing
+  `service_endpoints.opa` means chat does not start at all.
+- Any leftover `tools.<tool>.role` in agentic_chat.yml prevents start.
+- `context_length` replaces `max_context_tokens`.
+
+Upstream sources are NOT mounted. Fetch them:
+    git clone --depth 1 --branch v3.0.0 \
+      https://gitlab.opencode.de/f13/microservices/core.git
+    git clone --depth 1 --branch v3.0.0 \
+      https://gitlab.opencode.de/f13/microservices/chat.git
+Never invent an upstream schema — fetch the real file and diff.
+
+Backpressure for this phase:
+    shellcheck -S warning bin/* lib/*.sh && bats tests/
+
+Feature branch: feat/phase17-rebaseline. Single Phase 17 PR at the end.
 
 ### Out of scope for this loop — do NOT pick from these
 
-- S53/S54/S55/S56 (signing / .dmg / .AppImage+.deb / release CI
-  secrets) — see above.
-- HF5 in /PRD.md → promoted to S61 in Phase 11. Don't pick up
-  until Phase 10 ships.
-- Phase 11 / S61, S62 — targeted v0.6.0.
-- Phase 12 / S71–S73 (Homebrew) — targeted v0.7.0.
-- Phases 13–16 / S81–S115 — long-horizon, not active.
+- **S130** (does the stack actually boot) — maintainer-driven. The
+  sandbox has NO Docker. You cannot run `docker compose up`, and you
+  must NOT claim any story is "verified working" on a running stack.
+- RAG, summary, parser, transcription, inference-adapter, tusd,
+  rustfs, elasticsearch, reranker — explicitly out of the minimal
+  stack for this phase.
+- Phases 11–16 / S61–S115 — deferred behind Phase 17.
 
 ### When the loop IS active again (for future Phase reference)
 
