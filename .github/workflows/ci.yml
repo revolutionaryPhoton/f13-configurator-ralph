@@ -6,18 +6,15 @@ name: CI
 # any change touching shell, workflows, or docs that affect tooling
 # behavior triggers it.
 
+# No paths filter on purpose. "shellcheck (Linux)" is a REQUIRED status check,
+# and a filtered workflow simply does not run for a PR that touches nothing it
+# matches -- so the check never reports and the PR is blocked forever. A
+# docs-only PR was unmergeable for exactly this reason. Running shellcheck on a
+# markdown change costs ~13s; a permanently stuck PR costs far more.
 on:
   push:
     branches: [main]
-    paths:
-      - "**/*.sh"
-      - "docker/**"
-      - ".github/workflows/**"
   pull_request:
-    paths:
-      - "**/*.sh"
-      - "docker/**"
-      - ".github/workflows/**"
 
 jobs:
   shellcheck:
