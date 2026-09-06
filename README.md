@@ -47,7 +47,8 @@ backpressure checks, commit, repeat.
 | `ralph-dashboard.sh` | Live cost / progress dashboard (`tmux` split or one-shot). Reads `ralph-logs/*.json` and the configurator's `PROGRESS.md`. |
 | `ralph-live.sh` | Stream-json → human filter. Pipes Claude's verbose output into a tidy live feed and writes a usage summary at the end. |
 | `docker/` | Sandbox pieces: `ralph.Dockerfile` (prebuilt pinned image), `init-firewall.sh` + `ralph-entrypoint.sh` (egress allowlist, privilege drop), `sbx-template.Dockerfile` (Docker Sandboxes template). |
-| `PRD.md` | The product requirements document for the configurator. Story list (`S00`…`S115`, grows per phase) drives one iteration each. |
+| `smoke.sh` | Unattended generate + launch + report for the configurator stack. Always renders via `F13_STATE_ACTION=reset` (the interactive "keep" path can reuse a damaged `generated/`), pre-checks every bind-mount source, then reports container state and dumps logs for anything that did not survive. `SMOKE_BUILD=1` also rebuilds the patched frontend image. |
+| `PRD.md` | The product requirements document for the configurator. Story list (`S00`…`S130`, grows per phase) drives one iteration each. |
 | `.env.example` | Template for `.env.local` (Discord webhook + guardrail/sandbox knobs). |
 
 ## Sandbox modes
