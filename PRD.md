@@ -1545,7 +1545,7 @@ Phase 10 to keep that release focused on first-distribution.
 ### Phase 12: Homebrew distribution
 
 A single-purpose phase: make `brew install --cask f13-configurator`
-work for macOS users. **Target release: v0.7.0.**
+work for macOS users. **Target release: v0.8.0.**
 
 GitHub Releases stay the canonical artifact source; Homebrew is a
 convenience layer on top. Requires a Homebrew tap repository
@@ -1597,7 +1597,7 @@ Today the configurator ships exactly one preset: `core + frontend +
 chat`. That's the easiest possible slice of F13 — useful for trying
 the platform but nowhere near what real users want. Phase 13 adds a
 **`full`** preset that brings up the rest of F13's microservice
-catalog as a single opinionated bundle. **Target release: v0.8.0.**
+catalog as a single opinionated bundle. **Target release: v0.9.0.**
 
 No per-service customization in this phase — that's Phase 14. Phase
 13 deliberately keeps the UX simple ("basic" vs "full" radio) while
@@ -1728,7 +1728,7 @@ estimation are all proven against a working stack.
 
 Phase 13 ships an opinionated bundle. Phase 14 replaces the
 `basic`/`full` radio with a **checkbox grid** so users can mix and
-match. **Target release: v0.9.0.**
+match. **Target release: v0.10.0.**
 
 This is purely a UX layer on top of Phase 13's templates and
 preflight machinery — no new service work, no new image pins.
@@ -1851,12 +1851,22 @@ post-distribution phase.
 
 The biggest customization story — let organizations rebrand F13 for
 their own use. Logo, color palette, and arbitrary text-string
-overrides. **Target release: v0.11.0.**
+overrides. **Target release: v0.12.0.**
 
-**Architecture constraint:** F13 frontend does NOT support runtime
-overrides (no env-var or volume-mount mechanism, and no upstream
-appetite for adding one as of 2026-05). The only viable path is
-**extending the existing S16 patched-build pattern** — generate
+**Architecture constraint (needs re-verification):** the *Svelte* F13
+frontend does NOT support runtime overrides (no env-var or
+volume-mount mechanism, and no upstream appetite for adding one as of
+2026-05), so the only viable path there is **extending the existing S16
+patched-build pattern**.
+
+> ⚠️ This assumption is about the **old Svelte frontend**. Upstream now
+> ships `microservices/f13-frontend`, a React workspace whose
+> `packages/extensions` provides "framework-neutral hook/filter
+> primitives used by the app extension facade" — i.e. plausibly the
+> runtime override channel this phase was designed around not having.
+> Re-check before planning Phase 16; if the configurator migrates to
+> that frontend, the patched-build approach may be replaced by a
+> supported extension mechanism rather than extended. — generate
 overrides into the patched frontend image at build time, same as
 `UIStore.js` and the `docker-entrypoint.sh` patches already do.
 
@@ -2013,7 +2023,30 @@ so it **can and must** fetch real config files rather than inventing them.
 **Branch + PR workflow:** single feature branch `feat/phase17-rebaseline`,
 single Phase 17 PR.
 
-- [ ] **S121: Vendor upstream reference configs**
+**SHIPPED as v0.6.0 (2026-09-06).** S121–S129 were driven by the ralph loop (8
+iterations, ~$33 on Sonnet 5) against upstream configs it fetched itself rather
+than recalled. S130 was maintainer-driven and found **six defects that only
+exist once containers run** — the suite stayed green throughout, so none were
+reachable from tests: postgres 18's moved volume mount; APISIX opening
+`config-guest.yaml` by name; feedback needing core's `general.yml`; Docker
+creating a missing bind-mount source as a directory (which then latches every
+later render, and `down -v` does not clear it); the frontend requiring `tusd`;
+and `mktemp` 0600 leaving the patched nginx template unreadable.
+
+Verified end-to-end: `:8000/chat/llms` returns 200 through the gateway, `:9999`
+serves the app. Guards added: `compose::validate_generated` as a `compose::up`
+precondition, and the wizard's "keep" path re-renders a damaged tree rather
+than launching it.
+
+**Known limitations carried forward:** no resumable file upload in the minimal
+stack (needs `tusd`, which pulls in rustfs + transcription); and routes to
+omitted services **hang** rather than failing fast — APISIX ships routes for
+rag/summary/transcription, and with those absent the request stalls until the
+client times out. Not reachable in normal use because `ENABLED_FEATURES` gates
+them out of the UI, but it becomes real if Phase 13/14 enable a feature whose
+service is not deployed.
+
+- [x] **S121: Vendor upstream reference configs**
 
   Fetch the authoritative v3 configs into `docs/upstream/` so every later
   story diffs against ground truth instead of guessing:
@@ -2034,7 +2067,7 @@ single Phase 17 PR.
   **Loop-runnable.** Acceptance: files present, non-empty, and
   `docs/upstream/README.md` names the tags.
 
-- [ ] **S122: Compose template — core becomes an APISIX gateway**
+- [x] **S122: Compose template — core becomes an APISIX gateway**
 
   Rewrite the `core` service in `templates/docker-compose.yml.tmpl`:
   image `apache/apisix:3.15.0-ubuntu`, `APISIX_STAND_ALONE=true`,
@@ -2050,7 +2083,7 @@ single Phase 17 PR.
   `microservices/core` reference; bats asserts the four apisix files render
   and are valid YAML.
 
-- [ ] **S123: Compose template — add the mandatory OPA service**
+- [x] **S123: Compose template — add the mandatory OPA service**
 
   Add an `opa` service: image `opa:1.18.1-debug`, command
   `run --server --addr=:8181 --watch --set=decision_logs.console=true /policies`,
@@ -2062,7 +2095,7 @@ single Phase 17 PR.
   **Loop-runnable.** Acceptance: bats asserts the opa service renders with
   the policy mount and chat depends on it.
 
-- [ ] **S124: Compose template — feedback service, postgres 18, ollama-mock**
+- [x] **S124: Compose template — feedback service, postgres 18, ollama-mock**
 
   Add the `feedback` service (`feedback:v1.0.0`, depends on a healthy
   `feedback-db`, `feedback_db.secret` mounted, `./configs` volume). Bump
@@ -2071,7 +2104,7 @@ single Phase 17 PR.
 
   **Loop-runnable.** Acceptance: bats asserts all three.
 
-- [ ] **S125: chat config templates — the startup-fatal three**
+- [x] **S125: chat config templates — the startup-fatal three**
 
   In `templates/chat/`:
   - `general.yml.tmpl`: add `service_endpoints.opa: http://opa:8181/`.
@@ -2085,7 +2118,7 @@ single Phase 17 PR.
   that `max_context_tokens` appears nowhere in rendered chat config, and
   that no `role:` key exists under `tools.` in `agentic_chat.yml`.
 
-- [ ] **S126: core config templates — v3 schema**
+- [x] **S126: core config templates — v3 schema**
 
   In `templates/core/`: update `general.yml.tmpl` `service_endpoints`
   (`transcription_inference` is gone; `inference-adapter` / `inference`
@@ -2097,7 +2130,7 @@ single Phase 17 PR.
   exists in `docs/upstream/v3/core/general.yml` — assert this in bats
   rather than eyeballing it.
 
-- [ ] **S127: env + wizard surface**
+- [x] **S127: env + wizard surface**
 
   `env.tmpl`: rename `CHAT_MAX_CONTEXT_TOKENS` → `CHAT_CONTEXT_LENGTH`,
   drop `CORE_IMAGE`, add `OPA_PORT` (default 8181) and `FEEDBACK_PORT`
@@ -2108,7 +2141,7 @@ single Phase 17 PR.
   **Loop-runnable.** Acceptance: `grep -r CHAT_MAX_CONTEXT_TOKENS` returns
   nothing outside `docs/`; bats covers the `.state` migration path.
 
-- [ ] **S128: frontend pin bump to v3.0.1 + patch re-derivation**
+- [x] **S128: frontend pin bump to v3.0.1 + patch re-derivation**
 
   Bump `_FRONTEND_GIT_REF` to `v3.0.1` (image tag becomes
   `f13-frontend:v3.0.1_based`). Re-derive the S16 feature-gating patches
@@ -2120,7 +2153,7 @@ single Phase 17 PR.
   if the patches do not apply.** The loop cannot build the image (no Docker),
   so "patches apply" is the acceptance bar, not "image builds".
 
-- [ ] **S129: Backpressure + regression sweep**
+- [x] **S129: Backpressure + regression sweep**
 
   `shellcheck -S warning bin/* lib/*.sh` clean, full `bats tests/` green,
   and every new template covered by at least one bats case. Update
@@ -2129,7 +2162,7 @@ single Phase 17 PR.
 
   **Loop-runnable.**
 
-- [ ] **S130: Maintainer smoke — does the stack actually boot?**
+- [x] **S130: Maintainer smoke — does the stack actually boot?**
 
   **Maintainer-driven. The loop structurally cannot do this** — no Docker
   in the sandbox. On the host: generate a stack, `docker compose up`, and
@@ -2156,8 +2189,12 @@ The PRD's story sequence maps onto the GitHub release line as follows:
 | v0.3.1 | **HF4** — reconfigure flow re-renders on backend swap | shipped | Single ship covering three compounding bugs (env clobber in `state::read`, `F13_STATE_ACTION` shadowed before `state::check`, running stack not stopped before re-render) plus a GUI early-stop on the Reconfigure button so the wizard's port-check screen sees free ports. Validated on macOS via manual smoke (mock → Ollama → mock → fresh init); Linux validation deferred to next WSL2 session — pure logic/state-machine fix, no Linux-specific surface. PR #1 squashed as `f342a1f`. Ralph loop NOT used. |
 | v0.3.2 | **HF2 + HF3 + tauri 2.11.1** — Cancel kills wizard subprocess; missing-image precondition; Dependabot bump | shipped | HF2 plumbed `AbortSignal` end-to-end with a double-down mitigation for the orphaned `docker compose up` grandchild (proper kill-process-group fix deferred). HF3 pinned `pull_policy: never` on the frontend service and added a `docker image inspect` precondition in `compose::up` with the failure reason propagated through `COMPOSE_ERROR_MESSAGE` into the `done` event so the GUI's toast surfaces the friendly text. Tauri 2.10.3 → 2.11.1 via Dependabot #2 (Cargo.lock only). PR #3 squashed as `69f9bff`. Ralph loop NOT used. |
 | v0.4.0 | **Phase 9 (S41–S44)** GUI localization + zoom | shipped | English / German / French / Spanish translations of every GUI string (176 keys × 4 locales, key parity enforced in CI); locale picker on the welcome screen only, persisted to `f13.configurator.locale`; zoom via `Ctrl/Cmd + +/−/0` shortcuts and a `−` / `100%` / `+` stepper in Settings → Appearance, factor persisted to `f13.configurator.zoom`. Shell wizard terminal output stays English. Ralph loop drove S41–S44; maintainer review added the LS key rename + Settings absence test + localization gaps in the Ollama prose / ports note / reset modal as follow-ups. PR #4 squashed as `dc3d10f`. |
-| v0.5.0 | **Phase 10 (S51–S56)** Signed distributables + bundled-mode data paths | planned | `appLocalDataDir` for bundled installs (replaces dev-only path), `f13-stop`/`f13-reset` discovery, signed `.dmg` (macOS arm64 only), `.AppImage` + `.deb` (Linux x86_64 only), GitHub Releases automation with draft + manual publish. Feature branch `feat/phase10-distributables`, single PR. S51 + S52 loop-runnable; S53–S56 maintainer-driven (Apple cert, GitHub release secrets). |
-| **v0.6.0** | **Phase 17 (S121–S130)** Upstream re-baseline | **next** | **Priority Zero — preempts Phases 11–16, which each shift one minor later.** core v2.0.0 → APISIX gateway (`apache/apisix:3.15.0-ubuntu`; the core app image no longer exists in v3's deployment), chat v1.2.0 → v3.0.0, mandatory OPA sidecar (chat v3 refuses to start without `service_endpoints.opa`), feedback service added, postgres 17 → 18, ollama-mock path+tag corrected, frontend ref v2.0.0 → v3.0.1 with S16 patches re-derived. Minimal stack only — RAG/summary/parser/transcription explicitly out of scope. Loop-runnable except S130 (stack smoke), which needs Docker the sandbox does not have. Feature branch `feat/phase17-rebaseline`, single PR. |
+| v0.5.0 | **Phase 10 (S51–S56)** Signed distributables + bundled-mode data paths | shipped | `appLocalDataDir` for bundled installs (replaces dev-only path), `f13-stop`/`f13-reset` discovery, signed `.dmg` (macOS arm64 only), `.AppImage` + `.deb` (Linux x86_64 only), GitHub Releases automation with draft + manual publish. Feature branch `feat/phase10-distributables`, single PR. S51 + S52 loop-runnable; S53–S56 maintainer-driven (Apple cert, GitHub release secrets). |
+| v0.5.1 | Dependency maintenance (no phase) | shipped | GUI build/runtime deps refreshed; macOS-only from here on — Linux `.AppImage`/`.deb` deferred pending an older-glibc rebuild. |
+| v0.5.2 | Security + dependency maintenance (no phase) | shipped | Two `undici` advisories (one HIGH) plus a GUI dep refresh. |
+| v0.5.3 | Dependency maintenance (no phase) | shipped | Tauri JS+Rust toolchain, vite/Tailwind chain, Svelte and test libs. |
+| v0.5.4 | Security + dependency maintenance (no phase) | shipped | Cleared all 9 open advisories (2 HIGH) after a two-month gap: `undici` ×5, `postcss` ×2, `@sveltejs/kit`, `serde_with`. |
+| **v0.6.0** | **Phase 17 (S121–S130)** Upstream re-baseline | **shipped** | **Priority Zero — preempts Phases 11–16, which each shift one minor later.** core v2.0.0 → APISIX gateway (`apache/apisix:3.15.0-ubuntu`; the core app image no longer exists in v3's deployment), chat v1.2.0 → v3.0.0, mandatory OPA sidecar (chat v3 refuses to start without `service_endpoints.opa`), feedback service added, postgres 17 → 18, ollama-mock path+tag corrected, frontend ref v2.0.0 → v3.0.1 with S16 patches re-derived. Minimal stack only — RAG/summary/parser/transcription explicitly out of scope. Loop-runnable except S130 (stack smoke), which needs Docker the sandbox does not have. Feature branch `feat/phase17-rebaseline`, single PR. |
 | v0.7.0 | **Phase 11 (S61 + S62)** UX polish + auto-update | planned | S61: auto-regenerate broken stack on Start instead of forcing user through Reconfigure wizard (former HF5, promoted to a real story since it's pure GUI plumbing). S62: optional Tauri auto-update with separate updater keypair and signed manifest in the GitHub Release (former S57). Feature branch `feat/phase11-polish-autoupdate`, single PR. |
 | v0.8.0 | **Phase 12 (S71–S73)** Homebrew distribution | planned | macOS users can `brew install --cask f13-configurator` from a maintainer-owned tap (`revolutionaryPhoton/homebrew-f13`). GitHub Releases remain the canonical artifact source. S73 (release-workflow integration to auto-bump the cask formula) is optional. Feature branch `feat/phase12-homebrew`, single PR. |
 | v0.9.0 | **Phase 13 (S81–S86)** Full preset — RAG + summary + parser | planned | New `full` preset alongside today's `basic`. RAG, summary, parser services templated and gated by Compose profiles + `ENABLED_FEATURES`. Ollama picker grows an embedding-model selection when RAG is in the preset. Preflight learns to estimate per-service RAM/disk against host resources. Single preset radio (basic / full), no per-service toggles yet. Transcription explicitly deferred. Feature branch `feat/phase13-full-preset`, single PR. Mostly loop-runnable; S81 (upstream catalog research) is maintainer-driven. |
@@ -2173,24 +2210,27 @@ ralph loop drove end-to-end since Phase 7.5. HF5 (auto-regenerate
 broken stack on Start) was promoted from a maintainer hand-fix
 to a planned story — it's tracked as **S61** in Phase 11. Phase
 10 (signed distributables, was originally Phase 9, retargeted to
-v0.5.0) is gated on the maintainer's Apple Developer enrollment
-and GitHub repo secrets being in place. Phase 11 (v0.6.0) bundles
-the auto-update story (former S57) with HF5/S61 once Phase 10 has
-shipped. Phase 12 (v0.7.0) adds Homebrew cask distribution as a
-convenience layer on top of the canonical GitHub Releases.
+v0.5.0) **shipped** as v0.5.0 — the Apple Developer enrollment and
+GitHub release secrets that gated it are in place. v0.5.1–v0.5.4
+were dependency- and security-maintenance releases carrying no
+phase. **Phase 17 (upstream re-baseline) shipped as v0.6.0** and
+preempted Phases 11–16, which each moved one minor later. Phase 11
+(v0.7.0) bundles the auto-update story (former S57) with HF5/S61.
+Phase 12 (v0.8.0) adds Homebrew cask distribution as a convenience
+layer on top of the canonical GitHub Releases.
 
 Phases 13–16 are the **feature-completeness arc** — taking the
 configurator from "the simplest possible F13" to "every F13
 microservice, mixed and matched, with chat tuning and full
 branding overrides." Phase 13 ships the `full` preset (RAG +
-summary + parser) as an opinionated bundle (v0.8.0). Phase 14
+summary + parser) as an opinionated bundle (v0.9.0). Phase 14
 replaces the basic/full radio with a per-service checkbox grid
-(v0.9.0). Phase 15 adds chat parameter tuning — system prompt,
-temperature, token limits (v0.10.0). Phase 16 lets organizations
+(v0.10.0). Phase 15 adds chat parameter tuning — system prompt,
+temperature, token limits (v0.11.0). Phase 16 lets organizations
 rebrand F13 by patching the upstream frontend image with custom
 logo, colors, and text strings at build time — the only viable
 path since F13's frontend doesn't support runtime overrides
-(v0.11.0). Transcription is explicitly out of scope across all
+(v0.12.0). Transcription is explicitly out of scope across all
 these phases; if there's demand, a future Phase 18 "specialty
 services" bucket would pick it up (Phase 17 is the upstream
 re-baseline).

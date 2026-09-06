@@ -119,11 +119,19 @@ What this means for users / contributors of either repo:
   requests receive HTTP 403.
 - The sandbox mounts only `configurator_v1/` (rw, at its host path) and
   a staged copy of `PRD.md` in `.ralph-sbx/` (ro). Verified on the sbx
-  CLI runtime (v0.34): no `~/.claude` credentials are copied in, and
+  CLI runtime (**v0.34**): no `~/.claude` credentials are copied in, and
   the github credential helper has no token to serve — pushes fail by
   design, same as docker mode.
 - The template image is built on the host daemon and loaded into the
   sandbox runtime's own image store via `sbx template load`.
+
+> ⚠️ **The sbx verification above is against v0.34 and has not been repeated.**
+> The CLI has since moved to **v0.35.0**, and the local credential is revoked
+> (`sbx ls` reports `refresh token revoked`). Docker does not publish release
+> notes for the sbx tap, so the delta cannot be reasoned about from a changelog.
+> Re-run `./ralph.sh --sbx-check` after `brew upgrade docker/tap/sbx` and
+> `sbx login` before relying on sbx mode. `docker` mode is the default and is
+> unaffected.
 - The sandbox is created once and reused (persistent npm/cargo caches);
   each iteration is still a fresh claude conversation. Reset with
   `sbx rm f13-ralph`.
