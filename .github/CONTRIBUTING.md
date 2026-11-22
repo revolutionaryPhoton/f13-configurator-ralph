@@ -1,5 +1,10 @@
 # Contributing to f13-configurator-ralph
 
+> **⚠️ Archived November 2026 — contributions are closed.** The repository is
+> read-only; pull requests and issues cannot be opened or merged. You are very
+> welcome to fork it instead.
+
+
 This repo is the **harness** that drives Claude Code through the
 implementation of the
 [F13 Configurator](https://github.com/revolutionaryPhoton/f13-configurator).
