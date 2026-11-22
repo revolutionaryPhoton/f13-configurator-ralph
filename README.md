@@ -1,5 +1,26 @@
 # f13-configurator-ralph
 
+> ## ⚠️ Archived — no longer maintained (November 2026)
+>
+> The configurator this harness built is finished; development stopped at
+> [configurator v0.6.0](https://github.com/revolutionaryPhoton/f13-configurator/releases/tag/v0.6.0),
+> stamped here as the tag [`configurator-v0.6.0`](../../tree/configurator-v0.6.0).
+> This repository is read-only.
+>
+> **It is deliberately left public.** It was forked and starred by a few people,
+> and the harness is the more interesting half of the project: a hardened
+> sandbox for running an autonomous coding loop, with an egress allowlist, a
+> privilege drop, per-model cost accounting and a budget kill-switch. Read it,
+> fork it, take the parts that help. Nobody is maintaining it.
+>
+> Expect bit-rot: `claude-code` is pinned at 2.1.201 → 2.1.252, the Docker base
+> image is pinned by digest, and the experimental `sbx` mode was last verified
+> against sbx **v0.34** (since superseded). None of that will be updated.
+>
+> `PRD.md` is the most complete record of what was built — it carries the full
+> story catalogue through Phase 17.
+
+
 ![GitHub stars](https://img.shields.io/github/stars/revolutionaryPhoton/f13-configurator-ralph?style=social)
 ![GitHub forks](https://img.shields.io/github/forks/revolutionaryPhoton/f13-configurator-ralph?style=social)
 ![GitHub watchers](https://img.shields.io/github/watchers/revolutionaryPhoton/f13-configurator-ralph?style=social)

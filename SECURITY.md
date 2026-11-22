@@ -1,5 +1,18 @@
 # Security Notes — Ralph Loop Harness
 
+> ## ⚠️ Archived and unmaintained (November 2026) — do not report
+>
+> Nobody is triaging reports against this repository. The sandbox posture
+> described below was accurate when archived and was genuinely exercised, but
+> nothing in it will be updated or re-verified.
+>
+> **Known-stale specifically:** the `sbx` (Docker Sandboxes microVM) claims were
+> verified against sbx **v0.34** only. That CLI has since moved to v0.35+, the
+> local credential was revoked, and Docker publishes no release notes for the
+> tap — so the delta was never reasoned about. `docker` mode was the default and
+> the one actually used; treat the `sbx` section as unverified.
+
+
 This is **operator tooling**: it runs Claude Code with elevated permissions
 in a Docker sandbox and produces commits in a sibling repo. Read this
 document end-to-end before running `ralph.sh`.

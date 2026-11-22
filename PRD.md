@@ -1,5 +1,23 @@
 # PRD: F13 Shell Configurator (configurator_v1)
 
+> ## ⚠️ Archived November 2026 — this is a record, not a backlog
+>
+> **Phase 17 (upstream re-baseline) shipped as configurator v0.6.0 and was the
+> last.** Everything still marked `planned` below — **Phases 11–16, and the
+> hypothetical Phase 18** — is **abandoned, not deferred**. No work will resume
+> here.
+>
+> Kept intact because it documents the whole arc: 130 stories, which were
+> loop-runnable versus maintainer-driven, and why. If you are an agent reading
+> this file: there is nothing to pick up.
+>
+> One finding worth carrying out of it, recorded in the Phase 16 section: that
+> phase was designed around the F13 frontend having no runtime override channel.
+> That was true of the Svelte frontend; upstream's replacement React frontend
+> ships an extension facade that likely invalidates the premise. The question was
+> never resolved.
+
+
 ## Overview
 
 A shell-based configurator that stands up a minimal F13 deployment with a
