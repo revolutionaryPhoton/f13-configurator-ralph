@@ -19,6 +19,12 @@
 >
 > `PRD.md` is the most complete record of what was built — it carries the full
 > story catalogue through Phase 17.
+>
+> **Note on the links below:** the configurator repo itself
+> (`revolutionaryPhoton/f13-configurator`) was made **private** when it was
+> archived, so links to it from this README will 404 for you. They are left in
+> place because they document what the harness drove. This harness repo is the
+> public half.
 
 
 ![GitHub stars](https://img.shields.io/github/stars/revolutionaryPhoton/f13-configurator-ralph?style=social)
@@ -26,7 +32,6 @@
 ![GitHub watchers](https://img.shields.io/github/watchers/revolutionaryPhoton/f13-configurator-ralph?style=social)
 
 [![CI](https://github.com/revolutionaryPhoton/f13-configurator-ralph/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/revolutionaryPhoton/f13-configurator-ralph/actions/workflows/ci.yml)
-[![Configurator CI](https://github.com/revolutionaryPhoton/f13-configurator/actions/workflows/gui-build.yml/badge.svg?branch=main&label=configurator)](https://github.com/revolutionaryPhoton/f13-configurator/actions/workflows/gui-build.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![GitHub repo size](https://img.shields.io/github/repo-size/revolutionaryPhoton/f13-configurator-ralph)
 ![GitHub top language](https://img.shields.io/github/languages/top/revolutionaryPhoton/f13-configurator-ralph)
@@ -107,6 +112,9 @@ Clone it as a sub-directory of this repo (it is gitignored here):
 ```bash
 git clone https://github.com/revolutionaryPhoton/f13-configurator-ralph.git
 cd f13-configurator-ralph
+# NOTE: the configurator repo is private as of November 2026, so this clone will
+# fail unless you have access. The loop needs *some* product repo at
+# configurator_v1/ — point it at your own if you are reusing this harness.
 git clone https://github.com/revolutionaryPhoton/f13-configurator.git configurator_v1
 cp .env.example .env.local        # optional: paste a Discord webhook URL
 ```
